@@ -30,6 +30,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Sync Excel data before build
+        run: |
+          mkdir -p frontend/public/data site/data
+          cp -f courses.xlsx faculty.xlsx jobs.xlsx frontend/public/data/
+          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/
+          cp -f frontend/public/data/data-config.json site/data/ 2>/dev/null || true
+
       - name: Install & build site
         run: |
           cd frontend
@@ -37,11 +44,9 @@ jobs:
           npm run build
           node scripts/prepare-site.mjs
 
-      - name: Copy data into site
+      - name: Ensure site data is latest
         run: |
-          mkdir -p site/data
-          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/ 2>/dev/null || true
-          cp -f frontend/public/data/data-config.json site/data/ 2>/dev/null || true
+          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

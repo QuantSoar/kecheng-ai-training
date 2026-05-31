@@ -71,10 +71,13 @@ def _is_course_excel(path: str) -> bool:
 
 
 def _find_default_excel() -> str | None:
+    """查找课程 Excel：优先根目录 courses.xlsx，再 uploads，避免旧版「24实训室」表被误用。"""
+    explicit = BASE_DIR / "courses.xlsx"
+    if explicit.is_file() and _is_course_excel(str(explicit)):
+        return str(explicit)
     patterns = [
         str(UPLOAD_DIR / "*.xlsx"),
         str(UPLOAD_DIR / "*.xls"),
-        str(BASE_DIR / "*24*实训室*.xlsx"),
         str(BASE_DIR / "*.xlsx"),
     ]
     files: list[str] = []
