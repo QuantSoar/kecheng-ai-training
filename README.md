@@ -94,8 +94,25 @@ serve-site.bat
 - 静态站模式下数据从 `site/data/*.xlsx` 加载（见 `data/data-config.json`）
 - 浏览器内上传仅内存生效，刷新后丢失；生产环境请直接更新服务器上的 xlsx 文件
 
-## 技术栈
+## GitHub 发布
 
-- 后端：FastAPI + openpyxl
-- 前端：React + TypeScript + Vite + Tailwind CSS + ECharts
-- 路由：HashRouter（兼容静态部署子目录）
+本地已初始化 Git 仓库并完成首次提交。发布步骤：
+
+```bat
+publish-github.bat
+```
+
+或手动：
+
+1. 在 GitHub 创建空仓库 `kecheng-ai-training`（不要勾选 README）
+2. 推送代码：
+
+```bash
+git remote add origin git@github.com:QuantSoar/kecheng-ai-training.git
+git push -u origin main
+```
+
+3. **Settings → Pages → Source** 选择 **GitHub Actions**，自动部署 `site/`
+4. 访问 `https://quantsoar.github.io/kecheng-ai-training/#/demo`
+
+详细说明见 [DEPLOY.md](DEPLOY.md)。
