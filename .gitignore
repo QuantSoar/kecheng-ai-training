@@ -1,0 +1,42 @@
+# Dependencies
+frontend/node_modules/
+
+# Build cache (site/ 为部署产物，需提交)
+frontend/dist/
+
+# Python
+backend/__pycache__/
+backend/**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Uploads & runtime（本地后端上传缓存，不提交）
+uploads/
+backend/uploads/
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs & env
+*.log
+.env
+.env.*
+
+# Temp Excel locks
+~$*.xlsx
+
+# One-off analysis artifacts
+analysis_*.txt
+data_check_report.txt
+upload_validation_report.txt
+job_excel_analysis.json
+job_skills_summary.json
+analyze_*.py
+
+# TypeScript build info
+frontend/tsconfig.tsbuildinfo

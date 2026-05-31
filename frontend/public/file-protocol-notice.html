@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>请使用 HTTP 访问</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #faf6f1;
+      color: #3d3429;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 520px;
+      background: #fff;
+      border: 1px solid #e8ddd0;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 8px 32px rgba(61,52,41,.08);
+    }
+    h1 { font-size: 1.25rem; margin-bottom: 12px; color: #c45c26; }
+    p { line-height: 1.7; margin-bottom: 12px; font-size: 14px; color: #5c5348; }
+    code {
+      background: #f5ede4;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    ol { margin: 12px 0 0 20px; font-size: 14px; color: #5c5348; line-height: 1.9; }
+    .tip { margin-top: 16px; padding: 12px; background: #fff8f0; border-radius: 8px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>无法通过 file:// 直接打开</h1>
+    <p>浏览器安全策略禁止在本地文件协议下加载应用脚本（CORS / ES Module 限制）。这是正常现象，不是项目损坏。</p>
+    <p><strong>本地预览：</strong>回到项目根目录，双击运行</p>
+    <p><code>serve-site.bat</code></p>
+    <p>然后在浏览器访问 <code>http://127.0.0.1:8080</code></p>
+    <ol>
+      <li>先运行 <code>build-static.bat</code> 生成 site 目录</li>
+      <li>再运行 <code>serve-site.bat</code> 启动本地服务</li>
+      <li>将 site 目录上传到 Web 服务器后，通过 http/https 访问即可</li>
+    </ol>
+    <div class="tip">部署到 Nginx / OSS / GitHub Pages 等静态托管后，直接访问域名即可，无需此步骤。</div>
+  </div>
+</body>
+</html>
