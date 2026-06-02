@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 
 import { Link } from 'react-router-dom'
 
@@ -20,6 +20,10 @@ import {
 
   GitBranch,
 
+  Trophy,
+
+  Award,
+
 } from 'lucide-react'
 
 import { useData } from '../context/DataContext'
@@ -28,17 +32,27 @@ import { useJobMap } from '../context/JobMapContext'
 
 import { useFaculty } from '../context/FacultyContext'
 
+import { useCompCert } from '../context/CompCertContext'
+
 import Chart, { warmChartBase, WARM_CHART } from '../components/Chart'
 
 import CourseDetailDrawer from '../components/CourseDetailDrawer'
 
+import { EcosystemBadges } from '../components/CrossLinkStrip'
+
 import { selectClass } from '../styles/form'
+
+import { useCrossNavState, buildCrossNavUrl } from '../utils/crossNav'
+import { certForLab, certForJob, detailedCompetitionsForJob, detailedCompetitionsForLab, detailedCertificatesForLab } from '../utils/certLink'
+import { useEcosystem } from '../context/EcosystemContext'
 
 import type { Course, Lab } from '../types'
 
 import type { FacultyTeacher } from '../types/faculty'
 
 import type { JobProfile, LabJobCourseRow } from '../types/jobMap'
+
+import type { CompCertData } from '../types/compCert'
 
 import {
   resolveCourse,
@@ -68,6 +82,10 @@ const CATEGORY_META = [
 
   { name: '师资', color: '#5b7fa5', icon: Users },
 
+  { name: '竞赛', color: '#e65100', icon: Trophy },
+
+  { name: '证书', color: '#00897b', icon: Award },
+
 ] as const
 
 
@@ -96,7 +114,7 @@ interface GraphNode {
 
   _teacherId?: number
 
-  _entity?: 'job' | 'lab' | 'course' | 'teacher'
+  _entity?: 'job' | 'lab' | 'course' | 'teacher' | 'competition' | 'certificate'
 
 }
 
@@ -236,6 +254,7 @@ function buildUnifiedGraph(
   teachers: FacultyTeacher[],
   filters: GraphFilters,
   maxTeachers: number,
+  compCert: CompCertData | null,
 ) {
   const list = filterJobList(jobs, labCourseRows, filters)
   const includeLab = (labName: string) => !filters.filterLab || labName === filters.filterLab
@@ -251,6 +270,22 @@ function buildUnifiedGraph(
   const labSet = new Set<string>()
 
   const teacherSet = new Set<number>()
+
+  const compSources = new Map<string, Set<string>>()
+
+  const certSources = new Map<string, Set<string>>()
+
+  const noteComp = (name: string, sourceId: string) => {
+    if (!name.trim()) return
+    if (!compSources.has(name)) compSources.set(name, new Set())
+    compSources.get(name)!.add(sourceId)
+  }
+
+  const noteCert = (name: string, sourceId: string) => {
+    if (!name.trim()) return
+    if (!certSources.has(name)) certSources.set(name, new Set())
+    certSources.get(name)!.add(sourceId)
+  }
 
 
 
@@ -417,6 +452,19 @@ function buildUnifiedGraph(
 
     }
 
+    if (compCert) {
+      for (const comp of detailedCompetitionsForJob(job.name, compCert, jobs).slice(0, 8)) {
+        noteComp(comp.name, jobId)
+      }
+      for (const { lab } of job.labLinks) {
+        if (!includeLab(lab)) continue
+        for (const cert of detailedCertificatesForLab(lab, compCert, labs).slice(0, 5)) {
+          const certName = cert.shortName || cert.fullName
+          noteCert(certName, jobId)
+        }
+      }
+    }
+
   }
 
 
@@ -470,6 +518,15 @@ function buildUnifiedGraph(
 
       addLink(`t:${t.id}`, `l:${lab}`)
 
+    }
+
+    if (compCert) {
+      for (const comp of detailedCompetitionsForLab(lab, compCert, labs).slice(0, 6)) {
+        noteComp(comp.name, `l:${lab}`)
+      }
+      for (const cert of detailedCertificatesForLab(lab, compCert, labs).slice(0, 6)) {
+        noteCert(cert.shortName || cert.fullName, `l:${lab}`)
+      }
     }
 
   })
@@ -545,6 +602,52 @@ function buildUnifiedGraph(
 
 
 
+  const nodeIdSet = new Set(nodes.map((n) => n.id))
+  const scoped = Boolean(filters.filterJob || filters.filterLab || filters.jobCategory)
+  const compLimit = scoped ? 45 : 30
+  const certLimit = scoped ? 40 : 25
+
+  const pickTopLinked = (m: Map<string, Set<string>>, limit: number) =>
+    [...m.entries()]
+      .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0], 'zh-CN'))
+      .slice(0, limit)
+
+  for (const [compName, sources] of pickTopLinked(compSources, compLimit)) {
+    const id = `cmp:${compName}`
+    nodes.push({
+      id,
+      name: compName.length > 9 ? `${compName.slice(0, 9)}…` : compName,
+      symbolSize: scoped ? 20 : 18,
+      category: 4,
+      itemStyle: { color: '#e65100', borderColor: '#fffdf9', borderWidth: 2 },
+      label: baseLabel(8, scoped || sources.size >= 2),
+      _fullName: compName,
+      _entity: 'competition',
+    })
+    nodeIdSet.add(id)
+    for (const src of sources) {
+      if (nodeIdSet.has(src)) addLink(src, id)
+    }
+  }
+
+  for (const [certName, sources] of pickTopLinked(certSources, certLimit)) {
+    const id = `cert:${certName}`
+    nodes.push({
+      id,
+      name: certName.length > 9 ? `${certName.slice(0, 9)}…` : certName,
+      symbolSize: scoped ? 18 : 16,
+      category: 5,
+      itemStyle: { color: '#00897b', borderColor: '#fffdf9', borderWidth: 2 },
+      label: baseLabel(8, scoped || sources.size >= 2),
+      _fullName: certName,
+      _entity: 'certificate',
+    })
+    nodeIdSet.add(id)
+    for (const src of sources) {
+      if (nodeIdSet.has(src)) addLink(src, id)
+    }
+  }
+
   return {
     nodes,
     links,
@@ -552,113 +655,108 @@ function buildUnifiedGraph(
   }
 }
 
+function sankeyNodeLabel(prefix: string, text: string, max = 14) {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  const short = trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed
+  return `${prefix}·${short}`
+}
+
+function sankeyNodeColor(name: string) {
+  if (name.startsWith('岗位·')) return WARM_CHART.nodeJob
+  if (name.startsWith('实训室·')) return WARM_CHART.nodeLab
+  if (name.startsWith('课程·')) return WARM_CHART.nodeCourse
+  if (name.startsWith('竞赛·')) return '#e65100'
+  if (name.startsWith('证书·')) return '#00897b'
+  return WARM_CHART.muted
+}
+
 function buildSankeyData(
   jobs: JobProfile[],
   labCourseRows: LabJobCourseRow[],
   filters: GraphFilters,
+  compCert: CompCertData | null,
+  labs: Lab[],
 ) {
   const list = filterJobList(jobs, labCourseRows, filters)
-
-
+  const includeLab = (labName: string) => !filters.filterLab || labName === filters.filterLab
 
   const links: { source: string; target: string; value: number }[] = []
-
   const linkMap = new Map<string, number>()
-
   const nodeSet = new Set<string>()
 
-
-
   const bump = (source: string, target: string, value = 1) => {
-
+    if (!source || !target) return
     nodeSet.add(source)
-
     nodeSet.add(target)
-
     const key = `${source}\0${target}`
-
     linkMap.set(key, (linkMap.get(key) ?? 0) + value)
-
   }
-
-
 
   for (const job of list) {
-
     const jobNode = `岗位·${job.name}`
-
-    const labs = new Set(job.labLinks.map((l) => l.lab))
-
-
+    const jobLabs = new Set(job.labLinks.map((l) => l.lab))
 
     for (const row of labCourseRows) {
-
       if (row.job !== job.name) continue
-
-      labs.add(row.lab)
-
+      if (!includeLab(row.lab)) continue
+      jobLabs.add(row.lab)
       const labNode = `实训室·${shortLab(row.lab)}`
-
       bump(jobNode, labNode)
-
       for (const c of row.courses) {
-
         if (!c.trim()) continue
-
-        bump(labNode, `课程·${c.trim()}`)
-
+        bump(labNode, sankeyNodeLabel('课程', c))
       }
-
     }
-
-
 
     for (const skill of job.skills) {
-
       for (const lab of skill.labs) {
-
-        labs.add(lab)
-
+        if (!includeLab(lab)) continue
+        jobLabs.add(lab)
         const labNode = `实训室·${shortLab(lab)}`
-
         bump(jobNode, labNode)
-
         for (const c of skill.courses) {
-
           if (!c.trim()) continue
-
-          bump(labNode, `课程·${c.trim()}`)
-
+          bump(labNode, sankeyNodeLabel('课程', c))
         }
-
       }
-
     }
 
-
-
-    if (labs.size && !labCourseRows.some((r) => r.job === job.name) && !job.skills.some((s) => s.labs.length)) {
-
-      for (const lab of labs) bump(jobNode, `实训室·${shortLab(lab)}`)
-
+    if (jobLabs.size && !labCourseRows.some((r) => r.job === job.name) && !job.skills.some((s) => s.labs.length)) {
+      for (const lab of jobLabs) {
+        if (!includeLab(lab)) continue
+        bump(jobNode, `实训室·${shortLab(lab)}`)
+      }
     }
 
+    if (compCert) {
+      for (const comp of detailedCompetitionsForJob(job.name, compCert, jobs).slice(0, 6)) {
+        bump(jobNode, sankeyNodeLabel('竞赛', comp.name))
+      }
+      const certSeen = new Set<number>()
+      for (const { lab } of job.labLinks) {
+        if (!includeLab(lab)) continue
+        const labNode = `实训室·${shortLab(lab)}`
+        for (const comp of detailedCompetitionsForLab(lab, compCert, labs).slice(0, 4)) {
+          bump(labNode, sankeyNodeLabel('竞赛', comp.name))
+        }
+        for (const cert of detailedCertificatesForLab(lab, compCert, labs).slice(0, 4)) {
+          if (certSeen.has(cert.id)) continue
+          certSeen.add(cert.id)
+          bump(labNode, sankeyNodeLabel('证书', cert.shortName || cert.fullName))
+          bump(jobNode, sankeyNodeLabel('证书', cert.shortName || cert.fullName))
+        }
+      }
+    }
   }
-
-
 
   for (const [key, value] of linkMap) {
-
     const [source, target] = key.split('\0')
-
     links.push({ source, target, value })
-
   }
 
-
-
   return {
-    nodes: [...nodeSet].map((name) => ({ name })),
+    nodes: [...nodeSet].map((name) => ({ name, itemStyle: { color: sankeyNodeColor(name) } })),
     links,
   }
 }
@@ -673,6 +771,11 @@ export default function ShareNetwork() {
 
   const { data: facultyData } = useFaculty()
 
+  const { data: compCertData } = useCompCert()
+
+  const { params, setParams } = useCrossNavState()
+  const { setFocus } = useEcosystem()
+
   const [jobCategory, setJobCategory] = useState('')
   const [filterLab, setFilterLab] = useState('')
   const [filterJob, setFilterJob] = useState('')
@@ -682,6 +785,42 @@ export default function ShareNetwork() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
 
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
+
+  useEffect(() => {
+    if (params.lab) setFilterLab(params.lab)
+    if (params.job) setFilterJob(params.job)
+  }, [])
+
+  useEffect(() => {
+    if (filterLab !== params.lab || filterJob !== params.job) {
+      setParams({ lab: filterLab || undefined, job: filterJob || undefined }, true)
+    }
+  }, [filterLab, filterJob])
+
+  const certScope = useMemo(() => {
+    if (!compCertData || !data) return { competitions: 0, certificates: 0 }
+    if (filterLab) {
+      const s = certForLab(filterLab, compCertData, data.labs)
+      return { competitions: s.competitionCount, certificates: s.certificateCount }
+    }
+    if (filterJob && jobMapData) {
+      const s = certForJob(filterJob, compCertData, jobMapData.jobs)
+      const certNames = new Set<string>()
+      const job = jobMapData.jobs.find((j) => j.name === filterJob)
+      if (job && data) {
+        for (const { lab } of job.labLinks) {
+          for (const c of detailedCertificatesForLab(lab, compCertData, data.labs)) {
+            certNames.add(c.shortName || c.fullName)
+          }
+        }
+      }
+      return { competitions: s.competitionCount, certificates: certNames.size }
+    }
+    return {
+      competitions: compCertData.meta.total_competitions,
+      certificates: compCertData.meta.total_certificates,
+    }
+  }, [compCertData, data, filterLab, filterJob, jobMapData])
 
 
 
@@ -732,15 +871,30 @@ export default function ShareNetwork() {
       facultyData?.teachers ?? [],
       graphFilters,
       48,
+      compCertData,
     )
-  }, [jobMapData, data, facultyData, graphFilters])
+  }, [jobMapData, data, facultyData, graphFilters, compCertData])
 
-
+  const graphEntityCounts = useMemo(() => {
+    if (!unifiedGraph) return null
+    const counts = { competition: 0, certificate: 0 }
+    for (const n of unifiedGraph.nodes) {
+      if (n._entity === 'competition') counts.competition += 1
+      if (n._entity === 'certificate') counts.certificate += 1
+    }
+    return counts
+  }, [unifiedGraph])
 
   const sankeyData = useMemo(() => {
-    if (!jobMapData) return null
-    return buildSankeyData(jobMapData.jobs, jobMapData.labCourseRows, graphFilters)
-  }, [jobMapData, graphFilters])
+    if (!jobMapData || !data) return null
+    return buildSankeyData(
+      jobMapData.jobs,
+      jobMapData.labCourseRows,
+      graphFilters,
+      compCertData,
+      data.labs,
+    )
+  }, [jobMapData, data, graphFilters, compCertData])
 
 
 
@@ -798,6 +952,10 @@ export default function ShareNetwork() {
           if (d._entity === 'course') return `课程：${d._fullName ?? d.name}`
 
           if (d._entity === 'teacher') return `师资：${d._fullName ?? d.name}`
+
+          if (d._entity === 'competition') return `竞赛：${d._fullName ?? d.name}`
+
+          if (d._entity === 'certificate') return `证书：${d._fullName ?? d.name}`
 
           return d.name
 
@@ -914,8 +1072,23 @@ export default function ShareNetwork() {
   const handleGraphClick = useCallback((params: unknown) => {
     const p = params as { dataType?: string; data?: GraphNode & { id?: string } }
     if (p.dataType === 'edge' || !p.data?._entity) return
-    setSelectedNode((prev) => (prev?.id === p.data?.id ? null : (p.data as GraphNode)))
-  }, [])
+    const node = p.data as GraphNode
+    setSelectedNode((prev) => (prev?.id === node.id ? null : node))
+    const entity = node._entity
+    if (entity === 'job' && node._fullName) {
+      setFocus({ kind: 'job', id: node._fullName, label: node._fullName })
+    } else if (entity === 'lab' && node._fullName) {
+      setFocus({ kind: 'lab', id: node._fullName, label: node._fullName })
+    } else if (entity === 'course' && node._courseId) {
+      setFocus({ kind: 'course', id: String(node._courseId), label: node._fullName ?? node.name })
+    } else if (entity === 'teacher' && node._teacherId) {
+      setFocus({ kind: 'faculty', id: String(node._teacherId), label: node._fullName ?? node.name })
+    } else if (entity === 'competition' && node._fullName) {
+      setFocus({ kind: 'competition', id: node._fullName, label: node._fullName })
+    } else if (entity === 'certificate' && node._fullName) {
+      setFocus({ kind: 'certificate', id: node._fullName, label: node._fullName })
+    }
+  }, [setFocus])
 
 
 
@@ -940,20 +1113,42 @@ export default function ShareNetwork() {
 
 
   const selectedJobDetail = useMemo(() => {
-
     if (!selectedJob || !data || !jobMapData) return null
 
-    return {
+    const competitions = compCertData
+      ? detailedCompetitionsForJob(selectedJob.name, compCertData, jobMapData.jobs)
+      : []
 
-      courses: matchJobCourses(selectedJob, jobMapData.labCourseRows, data.courses),
-
-      labs: resolveJobLabs(selectedJob, data.labs),
-
-      faculty: facultyForJob(selectedJob, facultyData?.teachers ?? [], data.labs),
-
+    const certificates: { cert: import('../types/compCert').CertificateItem; lab: string }[] = []
+    if (compCertData) {
+      const seen = new Set<number>()
+      for (const { lab } of selectedJob.labLinks) {
+        const canonical = resolveLab(lab, data.labs)?.name ?? lab
+        for (const cert of detailedCertificatesForLab(canonical, compCertData, data.labs)) {
+          if (seen.has(cert.id)) continue
+          seen.add(cert.id)
+          certificates.push({ cert, lab: canonical })
+        }
+      }
     }
 
-  }, [selectedJob, data, jobMapData, facultyData])
+    return {
+      courses: matchJobCourses(selectedJob, jobMapData.labCourseRows, data.courses),
+      labs: resolveJobLabs(selectedJob, data.labs),
+      faculty: facultyForJob(selectedJob, facultyData?.teachers ?? [], data.labs),
+      competitions,
+      certificates,
+    }
+  }, [selectedJob, data, jobMapData, facultyData, compCertData])
+
+  const selectedLabDetail = useMemo(() => {
+    if (!selectedNode || selectedNode._entity !== 'lab' || !data || !compCertData) return null
+    const labName = selectedNode._fullName ?? ''
+    return {
+      competitions: detailedCompetitionsForLab(labName, compCertData, data.labs),
+      certificates: detailedCertificatesForLab(labName, compCertData, data.labs),
+    }
+  }, [selectedNode, data, compCertData])
 
 
 
@@ -961,21 +1156,6 @@ export default function ShareNetwork() {
 
   const graphViewStats = scopeStats
   const hasGraphFilter = Boolean(jobCategory || filterLab || filterJob || maxJobs > 0)
-
-  const kpiItems = ecosystemStats
-    ? [
-        { label: '岗位', value: ecosystemStats.jobs, hint: '岗位映射表', color: WARM_CHART.nodeJob, icon: Briefcase },
-        { label: '实训室', value: ecosystemStats.labs, hint: '课程体系建设', color: WARM_CHART.nodeLab, icon: Building2 },
-        { label: '课程', value: ecosystemStats.courses, hint: '课程库', color: WARM_CHART.nodeCourse, icon: BookOpen },
-        {
-          label: '师资',
-          value: facultyData ? ecosystemStats.teachers : '—',
-          hint: '师资库',
-          color: '#5b7fa5',
-          icon: Users,
-        },
-      ]
-    : []
 
   return (
 
@@ -985,14 +1165,15 @@ export default function ShareNetwork() {
 
         <div>
 
-          <h1 className="text-2xl font-bold text-gradient">课程能力图谱</h1>
+          <h1 className="text-2xl font-bold text-gradient">课程图谱</h1>
 
           <p className="text-warm-600 mt-1">
-            岗位 · 实训室 · 课程 · 师资 四元培养关系网络
+            六元培养关系网络 · 岗位 · 实训室 · 课程 · 师资 · 竞赛 · 证书
             {ecosystemStats && (
               <span className="text-warm-400">
                 {' '}
-                · 三表已匹配 {ecosystemStats.matchedCourses} 门课程 / {ecosystemStats.jobLinkedLabs} 个实训室
+                · 已匹配 {ecosystemStats.matchedCourses} 门课程 / {ecosystemStats.jobLinkedLabs} 个实训室
+                {compCertData ? ` / ${certScope.competitions} 项竞赛` : ''}
               </span>
             )}
           </p>
@@ -1001,7 +1182,7 @@ export default function ShareNetwork() {
 
         <Link
 
-          to="/jobs"
+          to={buildCrossNavUrl('/jobs', { job: filterJob || undefined, lab: filterLab || undefined })}
 
           className="text-xs text-accent-primary hover:underline inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-accent-primary/10 border border-accent-primary/20"
 
@@ -1013,35 +1194,20 @@ export default function ShareNetwork() {
 
       </header>
 
-
-
       {ecosystemStats && (
-        <div className="space-y-2">
-          <p className="text-[11px] text-warm-500">三表全量汇总（课程库 + 师资库 + 岗位映射）</p>
-          <div className="grid grid-cols-4 gap-3">
-            {kpiItems.map(({ label, value, hint, color, icon: Icon }) => (
-              <div key={label} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-warm-500">{label}</p>
-                  <p className="text-2xl font-bold" style={{ color }}>
-                    {value}
-                  </p>
-                  <p className="text-[10px] text-warm-400 mt-0.5">{hint}</p>
-                </div>
-                <Icon size={22} style={{ color, opacity: 0.45 }} />
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-warm-500 px-1">
-            <span>岗位映射课程 {ecosystemStats.jobMappedCourses} 门</span>
-            <span>已匹配课程库 {ecosystemStats.matchedCourses} 门</span>
-            <span>师资覆盖课程实训室 {ecosystemStats.teachersLinked} 人</span>
-            <span>课程+师资双覆盖实训室 {ecosystemStats.integratedLabs} 个</span>
-          </div>
-        </div>
+        <EcosystemBadges
+          variant="compact"
+          labs={ecosystemStats.labs}
+          courses={ecosystemStats.courses}
+          faculty={facultyData ? ecosystemStats.teachers : undefined}
+          jobs={ecosystemStats.jobs}
+          competitions={compCertData ? certScope.competitions : undefined}
+          certificates={compCertData ? certScope.certificates : undefined}
+          facultyLoaded={!!facultyData}
+          jobsLoaded={!!jobMapData}
+          certsLoaded={!!compCertData}
+        />
       )}
-
-
 
       <div className="glass rounded-2xl p-4">
 
@@ -1057,6 +1223,14 @@ export default function ShareNetwork() {
                 <span className={hasGraphFilter ? 'text-accent-primary' : 'text-warm-400'}>
                   {' '}
                   · 当前筛选 {graphViewStats.jobs} 岗位 / {graphViewStats.labs} 实训室 / {graphViewStats.courses} 课程 / {graphViewStats.teachers} 师资
+                  {compCertData && graphEntityCounts && (
+                    <>
+                      {' '}/ {graphEntityCounts.competition} 竞赛节点 / {graphEntityCounts.certificate} 证书节点
+                    </>
+                  )}
+                  {!compCertData && (
+                    <span className="text-accent-orange"> · 未加载竞赛·证书表，赛/证节点不可用</span>
+                  )}
                   {hasGraphFilter && (
                     <button
                       type="button"
@@ -1247,9 +1421,10 @@ export default function ShareNetwork() {
             )}
 
             <p className="text-[11px] text-warm-400 mt-2">
-
-              桑基图展示岗位经实训室到推荐课程的路径；师资关联请切换至力导向或环形视图。
-
+              桑基图展示岗位经实训室到课程、竞赛、证书的培养路径；师资关联请切换至力导向或环形视图。
+              {!compCertData && (
+                <span className="text-accent-orange"> 未加载竞赛·证书表时，赛/证分支不可用。</span>
+              )}
             </p>
 
           </>
@@ -1281,7 +1456,7 @@ export default function ShareNetwork() {
             <Chart option={graphOption} height={560} onEvents={{ click: handleGraphClick }} />
 
             <p className="text-[11px] text-warm-400 mt-2">
-              橙色=岗位 · 棕色=实训室 · 金色=课程 · 蓝色=师资。点击节点在右侧打开详情面板，再次点击同一节点或点「关闭」收起。
+              岗位 · 实训室 · 课程 · 师资 · 竞赛 · 证书 六类节点；橙=岗位、棕=实训室、金=课程、蓝=师资、深橙=竞赛、青绿=证书。点击节点查看详情。
             </p>
 
           </>
@@ -1318,19 +1493,65 @@ export default function ShareNetwork() {
 
 
           {selectedNode._entity === 'lab' && selectedNode._labId != null && (
-
             <Link
-
               to={`/labs/${selectedNode._labId}`}
-
               className="text-sm text-accent-primary hover:underline inline-flex items-center gap-1"
-
             >
-
               查看实训室详情 <ExternalLink size={12} />
-
             </Link>
+          )}
 
+          {selectedLabDetail && (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <MiniStat label="关联竞赛" value={selectedLabDetail.competitions.length} />
+                <MiniStat label="关联证书" value={selectedLabDetail.certificates.length} />
+              </div>
+              {selectedLabDetail.competitions.length > 0 && (
+                <div>
+                  <h4 className="text-xs text-warm-500 mb-2 flex items-center gap-1">
+                    <Trophy size={12} className="text-[#e65100]" />
+                    关联竞赛（前 6 项）
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLabDetail.competitions.slice(0, 6).map((c) => (
+                      <Link
+                        key={c.id}
+                        to={buildCrossNavUrl('/labs/compcerts', { lab: selectedNode._fullName || undefined })}
+                        className="px-2.5 py-1 rounded-lg bg-[#e65100]/10 text-xs text-[#bf360c] hover:bg-[#e65100]/20"
+                      >
+                        {c.name}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedLabDetail.certificates.length > 0 && (
+                <div>
+                  <h4 className="text-xs text-warm-500 mb-2 flex items-center gap-1">
+                    <Award size={12} className="text-[#00897b]" />
+                    关联证书（前 6 项）
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLabDetail.certificates.slice(0, 6).map((c) => (
+                      <Link
+                        key={c.id}
+                        to={buildCrossNavUrl('/labs/compcerts', { lab: selectedNode._fullName || undefined })}
+                        className="px-2.5 py-1 rounded-lg bg-[#00897b]/10 text-xs text-[#00695c] hover:bg-[#00897b]/20"
+                      >
+                        {c.shortName || c.fullName}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedNode._entity === 'lab' && compCertData && selectedLabDetail
+            && selectedLabDetail.competitions.length === 0
+            && selectedLabDetail.certificates.length === 0 && (
+            <p className="mt-3 text-xs text-warm-500">该实训室暂无关联竞赛或证书记录。</p>
           )}
 
 
@@ -1361,6 +1582,20 @@ export default function ShareNetwork() {
 
 
 
+          {(selectedNode._entity === 'competition' || selectedNode._entity === 'certificate') && (
+            <Link
+              to={buildCrossNavUrl('/labs/compcerts', {
+                job: filterJob || undefined,
+                lab: filterLab || undefined,
+              })}
+              className="text-sm text-accent-primary hover:underline inline-flex items-center gap-1 mt-2"
+            >
+              竞赛证书中心 <ExternalLink size={12} />
+            </Link>
+          )}
+
+
+
           {selectedJob && selectedJobDetail && (
 
             <div className="mt-4 space-y-4">
@@ -1373,14 +1608,16 @@ export default function ShareNetwork() {
 
               </p>
 
-              <div className="grid grid-cols-3 gap-3 text-center">
-
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 text-center">
                 <MiniStat label="关联实训室" value={selectedJobDetail.labs.length} />
-
                 <MiniStat label="推荐课程" value={selectedJobDetail.courses.length} />
-
                 <MiniStat label="匹配师资" value={selectedJobDetail.faculty.length} />
-
+                {compCertData && (
+                  <>
+                    <MiniStat label="关联竞赛" value={selectedJobDetail.competitions.length} />
+                    <MiniStat label="关联证书" value={selectedJobDetail.certificates.length} />
+                  </>
+                )}
               </div>
 
               {selectedJobDetail.labs.length > 0 && (
@@ -1479,6 +1716,47 @@ export default function ShareNetwork() {
 
                 </div>
 
+              )}
+
+              {compCertData && selectedJobDetail.competitions.length > 0 && (
+                <div>
+                  <h4 className="text-xs text-warm-500 mb-2 flex items-center gap-1">
+                    <Trophy size={12} className="text-[#e65100]" />
+                    关联竞赛（前 6 项）
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJobDetail.competitions.slice(0, 6).map((c) => (
+                      <Link
+                        key={c.id}
+                        to={buildCrossNavUrl('/labs/compcerts', { job: selectedJob.name })}
+                        className="px-2.5 py-1 rounded-lg bg-[#e65100]/10 text-xs text-[#bf360c] hover:bg-[#e65100]/20"
+                      >
+                        {c.name}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {compCertData && selectedJobDetail.certificates.length > 0 && (
+                <div>
+                  <h4 className="text-xs text-warm-500 mb-2 flex items-center gap-1">
+                    <Award size={12} className="text-[#00897b]" />
+                    关联证书（前 6 项）
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJobDetail.certificates.slice(0, 6).map(({ cert, lab }) => (
+                      <Link
+                        key={cert.id}
+                        to={buildCrossNavUrl('/labs/compcerts', { job: selectedJob.name, lab })}
+                        className="px-2.5 py-1 rounded-lg bg-[#00897b]/10 text-xs text-[#00695c] hover:bg-[#00897b]/20"
+                        title={lab}
+                      >
+                        {cert.shortName || cert.fullName}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               )}
 
             </div>

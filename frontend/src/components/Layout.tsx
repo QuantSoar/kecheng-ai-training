@@ -8,7 +8,6 @@ import {
   Building2,
   Share2,
   Monitor,
-  Users,
   GitMerge,
   Briefcase,
   Database,
@@ -23,10 +22,9 @@ type NavLinkItem = { to: string; label: string; icon: LucideIcon }
 const NAV: NavLinkItem[] = [
   { to: '/', label: '总览', icon: LayoutDashboard },
   { to: '/labs', label: '实训室全景', icon: Building2 },
-  { to: '/network', label: '课程能力图谱', icon: Share2 },
-  { to: '/faculty', label: '师资分析', icon: Users },
-  { to: '/integrated', label: '综合匹配', icon: GitMerge },
   { to: '/jobs', label: '岗位图谱', icon: Briefcase },
+  { to: '/network', label: '课程图谱', icon: Share2 },
+  { to: '/integrated', label: '综合匹配', icon: GitMerge },
   { to: '/data', label: '数据管理', icon: Database },
 ]
 
@@ -42,24 +40,32 @@ interface LayoutProps {
 
   jobMapMode: DataMode
 
+  compCertMode: DataMode
+
+  curriculumMode: DataMode
+
 }
 
 
 
-export default function Layout({ children, courseMode, facultyMode, jobMapMode }: LayoutProps) {
+export default function Layout({ children, courseMode, facultyMode, jobMapMode, compCertMode, curriculumMode }: LayoutProps) {
   const { data, loading } = useData()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const isFacultyPage = location.pathname.startsWith('/faculty')
+  const isFacultyPage =
+    location.pathname.startsWith('/faculty') || location.pathname.startsWith('/labs/faculty')
 
   const isIntegratedPage = location.pathname.startsWith('/integrated')
 
   const isJobsPage = location.pathname.startsWith('/jobs')
 
+  const isCompCertPage =
+    location.pathname.startsWith('/compcerts') || location.pathname.startsWith('/labs/compcerts')
+
   const isDataPage = location.pathname.startsWith('/data')
 
-  const skipCourseLoadingGate = isFacultyPage || isIntegratedPage || isJobsPage || isDataPage
+  const skipCourseLoadingGate = isFacultyPage || isIntegratedPage || isJobsPage || isCompCertPage || isDataPage
 
 
 
@@ -77,7 +83,7 @@ export default function Layout({ children, courseMode, facultyMode, jobMapMode }
 
 
 
-  const showModeHint = courseMode !== 'server' || facultyMode === 'cloud' || jobMapMode === 'cloud'
+  const showModeHint = courseMode !== 'server' || facultyMode === 'cloud' || jobMapMode === 'cloud' || compCertMode === 'cloud' || curriculumMode === 'cloud'
 
 
 
@@ -101,7 +107,7 @@ export default function Layout({ children, courseMode, facultyMode, jobMapMode }
 
             <p className="text-xs text-amber-600 mt-1" title="开发模式请确保 start.bat 已启动后端（8000 端口）">
 
-              模式：{modeLabel}{jobMapMode === 'cloud' && courseMode === 'server' ? ' · 岗位走云端' : ''}
+              模式：{modeLabel}{jobMapMode === 'cloud' && courseMode === 'server' ? ' · 岗位走云端' : ''}{compCertMode === 'cloud' && courseMode === 'server' ? ' · 竞赛证书走云端' : ''}{curriculumMode === 'cloud' && courseMode === 'server' ? ' · 课程体系走云端' : ''}
 
             </p>
 
@@ -179,7 +185,9 @@ export default function Layout({ children, courseMode, facultyMode, jobMapMode }
 
         ) : (
 
-          <div className={`p-6 mx-auto ${isJobsPage ? 'max-w-[1920px]' : 'max-w-[1600px]'}`}>{children}</div>
+          <div className={`p-6 mx-auto ${isJobsPage ? 'max-w-[1920px]' : 'max-w-[1600px]'}`}>
+            {children}
+          </div>
 
         )}
 

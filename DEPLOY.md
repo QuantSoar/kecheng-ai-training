@@ -8,17 +8,25 @@
 
 `site/data/` 需包含：
 
-- `courses.xlsx` / `faculty.xlsx` / `jobs.xlsx`
-- `data-config.json`
+- `courses.xlsx` — 课程
+- `faculty.xlsx` — 师资
+- `jobs.xlsx` — 岗位映射
+- `certs.xlsx` — 竞赛·证书
+- `curriculum-design.xlsx` — 实训室课程体系设计
+- `data-config.json` — 数据路径配置
 
-## 方式二：GitHub Pages（本仓库已配置 Actions）
+`site/templates/` 为上传模板（可选，数据管理页也可浏览器内下载）。
 
-1. 推送代码到 GitHub 后，进入仓库 **Settings → Pages**
-2. **Source** 选择 **GitHub Actions**
-3. 推送 `main` 分支后，Workflow `Deploy site to GitHub Pages` 会自动构建并发布 `site/`
-4. 访问 `https://<用户名>.github.io/<仓库名>/` ，大屏：`/#/demo`
+## 更新 Excel 数据
 
-更新 Excel：替换根目录或 `site/data/` 下 xlsx 后重新运行 `build-static.bat` 并 push。
+**推荐流程（本地）：**
+
+1. 将 Excel 放到项目根目录（或使用 `*课程*`、`*师资*`、`*岗位*`、`*竞赛*`、`*课程体系*` 等文件名）
+2. 运行 `sync-data.bat` — 同步到 `frontend/public/data/` 与 `site/data/`
+3. 运行 `build-static.bat` — 重新打包前端到 `site/`
+4. 上传 `site/` 全部文件到服务器（或 push 触发 GitHub Actions）
+
+**浏览器内上传（临时）：** 在「数据管理」页上传 Excel 可即时替换全站数据；静态部署下刷新或点「重新加载」会恢复为 `site/data/` 中的文件，持久化仍需 sync + 部署。
 
 ## 本地预览静态站
 

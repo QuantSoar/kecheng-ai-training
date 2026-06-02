@@ -1,8 +1,10 @@
 import type { Course, Lab } from '../types'
 import type { FacultyTeacher } from '../types/faculty'
 import type { JobProfile, LabJobCourseRow } from '../types/jobMap'
+import type { CompCertData } from '../types/compCert'
 import { TYPE_LABELS } from '../types'
 import { resolveLab } from './jobLink'
+import { buildJobCertIndex, buildLabCertIndex } from './certLink'
 
 export interface LabIntegration {
   lab: Lab
@@ -22,6 +24,9 @@ export interface LabIntegration {
   vendorRatioPct: number
   sharedCourseCount: number
   courseFacultyRatio: number | null
+  competitionCount: number
+  certificateCount: number
+  linkedCompetitions: string[]
 }
 
 function normText(s: string) {
@@ -108,10 +113,12 @@ export function buildLabIntegrations(
   opts?: {
     jobs?: JobProfile[]
     sharedIndex?: Map<string, number>
+    compCert?: CompCertData | null
   },
 ): LabIntegration[] {
   const jobIndex = opts?.jobs?.length ? buildLabJobIndex(opts.jobs, labs) : new Map<string, string[]>()
   const sharedIndex = opts?.sharedIndex ?? buildSharedCourseIndex(courses)
+  const certIndex = opts?.compCert ? buildLabCertIndex(opts.compCert, labs) : new Map()
 
   return labs.map((lab) => {
     const labCourses = courses.filter((c) => c.lab_name === lab.name)
@@ -136,6 +143,7 @@ export function buildLabIntegrations(
 
     const coverage = computeStrictCoverage(labCourses, labFaculty)
     const linkedJobs = jobIndex.get(lab.name) ?? []
+    const certSummary = certIndex.get(lab.name)
 
     const cc = labCourses.length
     const fc = labFaculty.length
@@ -175,6 +183,9 @@ export function buildLabIntegrations(
       vendorRatioPct: cc ? Math.round((vendorCourses / cc) * 100) : 0,
       sharedCourseCount,
       courseFacultyRatio: fc > 0 ? Math.round((cc / fc) * 10) / 10 : null,
+      competitionCount: certSummary?.competitionCount ?? 0,
+      certificateCount: certSummary?.certificateCount ?? 0,
+      linkedCompetitions: certSummary?.competitions.slice(0, 8) ?? [],
     }
   })
 }
@@ -187,6 +198,8 @@ export interface JobIntegrationRow {
   facultyCount: number
   labs: string[]
   completenessPct: number
+  competitionCount: number
+  linkedCompetitions: string[]
 }
 
 export function buildJobIntegrationRows(
@@ -195,7 +208,9 @@ export function buildJobIntegrationRows(
   courses: Course[],
   teachers: FacultyTeacher[],
   labs: Lab[],
+  compCert?: CompCertData | null,
 ): JobIntegrationRow[] {
+  const jobCertIndex = compCert ? buildJobCertIndex(compCert, jobs) : new Map()
   return jobs.map((job) => {
     const labSet = new Set<string>()
     for (const { lab } of job.labLinks) {
@@ -222,6 +237,7 @@ export function buildJobIntegrationRows(
     const linkedLabs = [...labSet]
     const facultyCount = teachers.filter((t) => t.lab_list.some((l) => labSet.has(l))).length
     const total = courseNames.size || 1
+    const certSummary = jobCertIndex.get(job.name)
     return {
       job,
       labCount: labSet.size,
@@ -230,6 +246,8 @@ export function buildJobIntegrationRows(
       facultyCount,
       labs: linkedLabs,
       completenessPct: Math.round((matched / total) * 100),
+      competitionCount: certSummary?.competitionCount ?? 0,
+      linkedCompetitions: certSummary?.competitions.slice(0, 6) ?? [],
     }
   }).sort((a, b) => b.completenessPct - a.completenessPct)
 }

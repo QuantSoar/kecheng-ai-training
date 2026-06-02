@@ -1,6 +1,7 @@
 import type { Course, GraphData, Lab, SharedCourse, VendorDetail } from './types'
 import type { FacultyData } from './types/faculty'
 import type { JobMapData } from './types/jobMap'
+import type { CompCertData } from './types/compCert'
 
 const API = '/api'
 
@@ -99,4 +100,23 @@ export async function uploadJobMapExcel(file: File): Promise<{ message: string; 
 
 export async function reloadJobMapData(): Promise<void> {
   await fetch(`${API}/jobs/reload`, { method: 'POST' })
+}
+
+export async function getCompCertData(): Promise<CompCertData> {
+  return fetchJson(`${API}/certs/data`)
+}
+
+export async function uploadCompCertExcel(file: File): Promise<{ message: string; meta: CompCertData['meta'] }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API}/certs/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || '上传失败')
+  }
+  return res.json()
+}
+
+export async function reloadCompCertData(): Promise<void> {
+  await fetch(`${API}/certs/reload`, { method: 'POST' })
 }

@@ -3,6 +3,8 @@
   "courseExcel": "./data/courses.xlsx",
   "facultyExcel": "./data/faculty.xlsx",
   "jobExcel": "./data/jobs.xlsx",
+  "certExcel": "./data/certs.xlsx",
+  "curriculumExcel": "./data/curriculum-design.xlsx",
   "cacheBust": true,
-  "_comment": "将 xlsx 放到 site/data/ 目录；jobs.xlsx 为「AI岗位-实训室-课程体系映射分析表」。更新后刷新或点重新加载即可同步。"
+  "_comment": "将 xlsx 放到 site/data/ 目录；certs.xlsx 为「AI竞赛证书综合映射表」。更新后刷新或点重新加载即可同步。"
 }

@@ -3,9 +3,14 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { DataContext } from './context/DataContext'
 import { FacultyContext } from './context/FacultyContext'
 import { JobMapContext } from './context/JobMapContext'
+import { CompCertContext } from './context/CompCertContext'
+import { CurriculumDesignContext } from './context/CurriculumDesignContext'
+import { EcosystemProvider } from './context/EcosystemContext'
 import type { GraphData } from './types'
 import type { FacultyData } from './types/faculty'
 import type { JobMapData } from './types/jobMap'
+import type { CompCertData } from './types/compCert'
+import type { CurriculumDesignData } from './types/curriculumDesign'
 import type { DataMode } from './services/dataSource'
 import {
   loadCourseData,
@@ -17,11 +22,14 @@ import {
   resetBackendCache,
 } from './services/dataSource'
 import { loadJobMapData, uploadJobMapWithFallback, reloadJobMapWithFallback } from './services/jobMapDataSource'
+import { loadCompCertData, uploadCompCertWithFallback, reloadCompCertWithFallback } from './services/compCertDataSource'
+import { loadCurriculumDesignData, uploadCurriculumDesignWithFallback } from './services/curriculumDesignDataSource'
 
 import Layout from './components/Layout'
 import LabHubLayout from './components/LabHubLayout'
 import Dashboard from './pages/Dashboard'
 import LabsPage from './pages/LabsPage'
+import CurriculumTiersPage from './pages/CurriculumTiersPage'
 import LabDetail from './pages/LabDetail'
 import CourseSearch from './pages/CourseSearch'
 import VendorCourses from './pages/VendorCourses'
@@ -29,6 +37,7 @@ import ShareNetwork from './pages/ShareNetwork'
 import FacultyAnalysis from './pages/FacultyAnalysis'
 import IntegratedAnalysis from './pages/IntegratedAnalysis'
 import JobSkillMap from './pages/JobSkillMap'
+import CompCertHub from './pages/CompCertHub'
 import DataManagement from './pages/DataManagement'
 import DemoMode from './pages/DemoMode'
 import { DataManagementContext } from './context/DataManagementContext'
@@ -81,6 +90,52 @@ export default function App() {
   const [jobMapLoading, setJobMapLoading] = useState(true)
   const [jobMapError, setJobMapError] = useState<string | null>(null)
   const [jobMapMode, setJobMapMode] = useState<DataMode>('client')
+  const [compCertData, setCompCertData] = useState<CompCertData | null>(null)
+  const [compCertLoading, setCompCertLoading] = useState(true)
+  const [compCertError, setCompCertError] = useState<string | null>(null)
+  const [compCertMode, setCompCertMode] = useState<DataMode>('client')
+  const [curriculumData, setCurriculumData] = useState<CurriculumDesignData | null>(null)
+  const [curriculumLoading, setCurriculumLoading] = useState(true)
+  const [curriculumError, setCurriculumError] = useState<string | null>(null)
+  const [curriculumMode, setCurriculumMode] = useState<DataMode>('client')
+
+  const refreshCurriculum = useCallback(async () => {
+    setCurriculumLoading(true)
+    setCurriculumError(null)
+    try {
+      const result = await loadCurriculumDesignData()
+      if (result) {
+        setCurriculumData(result.data)
+        setCurriculumMode(result.mode)
+      } else {
+        setCurriculumData(null)
+        setCurriculumMode('cloud')
+      }
+    } catch (e) {
+      setCurriculumError(e instanceof Error ? e.message : '课程体系设计数据加载失败')
+    } finally {
+      setCurriculumLoading(false)
+    }
+  }, [])
+
+  const refreshCompCert = useCallback(async () => {
+    setCompCertLoading(true)
+    setCompCertError(null)
+    try {
+      const result = await loadCompCertData()
+      if (result) {
+        setCompCertData(result.data)
+        setCompCertMode(result.mode)
+      } else {
+        setCompCertData(null)
+        setCompCertMode('cloud')
+      }
+    } catch (e) {
+      setCompCertError(e instanceof Error ? e.message : '竞赛·证书数据加载失败')
+    } finally {
+      setCompCertLoading(false)
+    }
+  }, [])
 
   const refreshJobMap = useCallback(async () => {
     setJobMapLoading(true)
@@ -90,6 +145,9 @@ export default function App() {
       if (result) {
         setJobMapData(result.data)
         setJobMapMode(result.mode)
+      } else {
+        setJobMapData(null)
+        setJobMapMode('cloud')
       }
     } catch (e) {
       setJobMapError(e instanceof Error ? e.message : '岗位映射数据加载失败')
@@ -102,9 +160,13 @@ export default function App() {
     setLoading(true)
     setFacultyLoading(true)
     setJobMapLoading(true)
+    setCompCertLoading(true)
+    setCurriculumLoading(true)
     setError(null)
     setFacultyError(null)
     setJobMapError(null)
+    setCompCertError(null)
+    setCurriculumError(null)
     const result = await loadAllData()
     setData(result.course)
     setCourseMode(result.courseMode)
@@ -117,13 +179,42 @@ export default function App() {
       if (jobResult) {
         setJobMapData(jobResult.data)
         setJobMapMode(jobResult.mode)
+      } else {
+        setJobMapData(null)
+        setJobMapMode('cloud')
       }
     } catch (e) {
       setJobMapError(e instanceof Error ? e.message : '岗位映射数据加载失败')
     }
+    try {
+      const certResult = await loadCompCertData()
+      if (certResult) {
+        setCompCertData(certResult.data)
+        setCompCertMode(certResult.mode)
+      } else {
+        setCompCertData(null)
+        setCompCertMode('cloud')
+      }
+    } catch (e) {
+      setCompCertError(e instanceof Error ? e.message : '竞赛·证书数据加载失败')
+    }
+    try {
+      const curriculumResult = await loadCurriculumDesignData()
+      if (curriculumResult) {
+        setCurriculumData(curriculumResult.data)
+        setCurriculumMode(curriculumResult.mode)
+      } else {
+        setCurriculumData(null)
+        setCurriculumMode('cloud')
+      }
+    } catch (e) {
+      setCurriculumError(e instanceof Error ? e.message : '课程体系设计数据加载失败')
+    }
     setLoading(false)
     setFacultyLoading(false)
     setJobMapLoading(false)
+    setCompCertLoading(false)
+    setCurriculumLoading(false)
   }, [])
 
   const refresh = useCallback(async () => {
@@ -209,6 +300,22 @@ export default function App() {
     return mode
   }
 
+  const handleCompCertUpload = async (file: File): Promise<DataMode> => {
+    const { data: parsed, mode } = await uploadCompCertWithFallback(file)
+    resetBackendCache()
+    setCompCertData(parsed)
+    setCompCertMode(mode)
+    setCompCertError(null)
+    return mode
+  }
+
+  const handleCurriculumUpload = async (file: File) => {
+    const { data: parsed, mode } = await uploadCurriculumDesignWithFallback(file)
+    setCurriculumData(parsed)
+    setCurriculumMode(mode)
+    setCurriculumError(null)
+  }
+
   const handleReload = async () => {
     const result = await reloadAllFromServer()
     if (result.course) {
@@ -226,8 +333,21 @@ export default function App() {
       setJobMapData(jobReloaded.data)
       setJobMapMode(jobReloaded.mode)
       setJobMapError(null)
+    } else {
+      setJobMapData(null)
+      setJobMapMode('cloud')
     }
-    if (!result.course && !result.faculty && !jobReloaded) {
+    const certReloaded = await reloadCompCertWithFallback()
+    if (certReloaded) {
+      setCompCertData(certReloaded.data)
+      setCompCertMode(certReloaded.mode)
+      setCompCertError(null)
+    } else {
+      setCompCertData(null)
+      setCompCertMode('cloud')
+    }
+    await refreshCurriculum()
+    if (!result.course && !result.faculty && !jobReloaded && !certReloaded) {
       await refreshAll()
     }
   }
@@ -238,15 +358,22 @@ export default function App() {
         onUploadCourse: handleUpload,
         onUploadFaculty: handleFacultyUpload,
         onUploadJobMap: handleJobMapUpload,
+        onUploadCompCert: handleCompCertUpload,
+        onUploadCurriculum: handleCurriculumUpload,
         onReload: handleReload,
         courseMode,
         facultyMode,
         jobMapMode,
+        compCertMode,
+        curriculumMode,
       }}
     >
     <DataContext.Provider value={{ data, loading, error, mode: courseMode, refresh }}>
       <FacultyContext.Provider value={{ data: facultyData, loading: facultyLoading, error: facultyError, mode: facultyMode, refresh: refreshFaculty }}>
         <JobMapContext.Provider value={{ data: jobMapData, loading: jobMapLoading, error: jobMapError, mode: jobMapMode, refresh: refreshJobMap }}>
+          <CompCertContext.Provider value={{ data: compCertData, loading: compCertLoading, error: compCertError, mode: compCertMode, refresh: refreshCompCert }}>
+          <CurriculumDesignContext.Provider value={{ data: curriculumData, loading: curriculumLoading, error: curriculumError, mode: curriculumMode, refresh: refreshCurriculum }}>
+          <EcosystemProvider>
           <Routes>
             <Route path="/demo" element={<DemoMode />} />
             <Route
@@ -256,27 +383,36 @@ export default function App() {
                   courseMode={courseMode}
                   facultyMode={facultyMode}
                   jobMapMode={jobMapMode}
+                  compCertMode={compCertMode}
+                  curriculumMode={curriculumMode}
                 >
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/labs" element={<LabHubLayout />}>
                       <Route index element={<LabsPage />} />
+                      <Route path="tiers" element={<CurriculumTiersPage />} />
                       <Route path="courses" element={<CourseSearch embedded />} />
                       <Route path="vendors" element={<VendorCourses embedded />} />
+                      <Route path="faculty" element={<FacultyAnalysis embedded />} />
+                      <Route path="compcerts" element={<CompCertHub embedded />} />
                     </Route>
                     <Route path="/labs/:id" element={<LabDetail />} />
                     <Route path="/courses" element={<Navigate to="/labs/courses" replace />} />
                     <Route path="/vendors" element={<Navigate to="/labs/vendors" replace />} />
                     <Route path="/network" element={<ShareNetwork />} />
-                    <Route path="/faculty" element={<FacultyAnalysis />} />
+                    <Route path="/faculty" element={<Navigate to="/labs/faculty" replace />} />
                     <Route path="/integrated" element={<IntegratedAnalysis />} />
                     <Route path="/jobs" element={<JobSkillMap />} />
+                    <Route path="/compcerts" element={<Navigate to="/labs/compcerts" replace />} />
                     <Route path="/data" element={<DataManagement />} />
                   </Routes>
                 </Layout>
               }
             />
           </Routes>
+          </EcosystemProvider>
+          </CurriculumDesignContext.Provider>
+          </CompCertContext.Provider>
         </JobMapContext.Provider>
       </FacultyContext.Provider>
     </DataContext.Provider>

@@ -1,10 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Building2, BookOpen, Factory } from 'lucide-react'
+import { Building2, BookOpen, Factory, Layers, Users, Trophy } from 'lucide-react'
 
 const TABS = [
   { to: '/labs', label: '实训室卡片', icon: Building2, end: true },
   { to: '/labs/courses', label: '课程分析', icon: BookOpen, end: false },
   { to: '/labs/vendors', label: '厂商课程', icon: Factory, end: false },
+  { to: '/labs/faculty', label: '师资分析', icon: Users, end: false },
+  { to: '/labs/compcerts', label: '竞赛·证书', icon: Trophy, end: false },
+  { to: '/labs/tiers', label: '课程体系', icon: Layers, end: false },
 ] as const
 
 export default function LabHubLayout() {
@@ -12,7 +15,7 @@ export default function LabHubLayout() {
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-bold text-gradient">实训室全景</h1>
-        <p className="text-warm-600 mt-1">按实训室维度浏览完整课程体系</p>
+        <p className="text-warm-600 mt-1">按实训室维度浏览课程体系、师资配置与竞赛证书</p>
       </header>
 
       <nav className="flex flex-wrap gap-2 p-1 rounded-xl bg-warm-100/80 border border-warm-300 w-fit">

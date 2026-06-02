@@ -192,10 +192,14 @@ export const TEMPLATE_DOWNLOADS = {
   course: `${base}templates/课程图谱上传模板.xlsx`,
   faculty: `${base}templates/师资多维分析上传模板.xlsx`,
   jobMap: `${base}templates/岗位映射上传模板.xlsx`,
+  compCert: `${base}templates/竞赛证书上传模板.xlsx`,
+  curriculumDesign: `${base}templates/实训室课程体系设计上传模板.xlsx`,
 } as const
 
 export const TEMPLATE_FILENAMES = {
   course: '课程图谱上传模板.xlsx',
   faculty: '师资多维分析上传模板.xlsx',
   jobMap: '岗位映射上传模板.xlsx',
+  compCert: '竞赛证书上传模板.xlsx',
+  curriculumDesign: '实训室课程体系设计上传模板.xlsx',
 } as const

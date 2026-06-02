@@ -1,13 +1,28 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, BookOpen, Factory, Share2, Layers, ChevronDown, ChevronRight, Briefcase, Users, Building2 } from 'lucide-react'
+import { Search, BookOpen, Factory, Share2, Layers, ChevronDown, ChevronRight, Briefcase, Users, Building2, Trophy, Award } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useFaculty } from '../context/FacultyContext'
 import { useJobMap } from '../context/JobMapContext'
+import { useCompCert } from '../context/CompCertContext'
+import { useCurriculumDesign } from '../context/CurriculumDesignContext'
+import { useEcosystem } from '../context/EcosystemContext'
+import { buildCrossNavUrl } from '../utils/crossNav'
+import { jobsForCourse, buildCourseToJobsIndex } from '../utils/jobLink'
+import { compCertForCourse } from '../utils/certLink'
+import {
+  buildDesignJobIndex,
+  jobsForCourseFromDesign,
+  mergeJobLists,
+  trackCoursesForCourse,
+} from '../utils/curriculumLink'
+import { TRAINING_TRACK_LABELS } from '../types/curriculumDesign'
 import Chart, { warmChartBase, WARM_CHART } from '../components/Chart'
 import type { Course, Lab } from '../types'
 import type { FacultyTeacher } from '../types/faculty'
-import type { JobProfile, LabJobCourseRow } from '../types/jobMap'
+import type { JobProfile } from '../types/jobMap'
+import type { CompetitionItem, CertificateItem } from '../types/compCert'
+import type { CurriculumTrackCourse } from '../types/curriculumDesign'
 import { TYPE_COLORS, TYPE_LABELS } from '../types'
 import { selectClass, inputClass } from '../styles/form'
 
@@ -58,26 +73,12 @@ function facultyForCourse(course: Course, teachers: FacultyTeacher[]) {
     .slice(0, 6)
 }
 
-function jobsForCourse(course: Course, jobs: JobProfile[], rows: LabJobCourseRow[]) {
-  const matched = new Map<string, JobProfile>()
-  for (const job of jobs) {
-    for (const row of rows) {
-      if (row.job !== job.name || row.lab !== course.lab_name) continue
-      if (row.courses.some((c) => courseNameMatch(c, course.name))) matched.set(job.name, job)
-    }
-    for (const skill of job.skills) {
-      if (skill.courses.some((c) => courseNameMatch(c, course.name))) matched.set(job.name, job)
-    }
-  }
-  if (course.vendor_detail?.jobs) {
-    const hints = course.vendor_detail.jobs.split(/[,，、;/\n]+/).map((s) => s.trim()).filter(Boolean)
-    for (const job of jobs) {
-      if (hints.some((h) => courseNameMatch(job.name, h) || courseNameMatch(h, job.name))) {
-        matched.set(job.name, job)
-      }
-    }
-  }
-  return [...matched.values()].slice(0, 6)
+interface CourseRelations {
+  faculty: FacultyTeacher[]
+  jobs: JobProfile[]
+  competitions: CompetitionItem[]
+  certificates: CertificateItem[]
+  tracks: CurriculumTrackCourse[]
 }
 
 
@@ -104,6 +105,9 @@ export default function CourseSearch({ embedded = false }: CourseSearchProps) {
   const { data } = useData()
   const { data: facultyData } = useFaculty()
   const { data: jobMapData } = useJobMap()
+  const { data: compCertData } = useCompCert()
+  const { data: curriculumData } = useCurriculumDesign()
+  const { setFocus } = useEcosystem()
   const [q, setQ] = useState('')
   const [lab, setLab] = useState('')
   const [type, setType] = useState('')
@@ -491,9 +495,11 @@ export default function CourseSearch({ embedded = false }: CourseSearchProps) {
 
       }
 
+      setFocus({ kind: 'lab', id: labName, label: labName })
+
     },
 
-    [lab, type, clearMapFilter],
+    [lab, type, clearMapFilter, setFocus],
 
   )
 
@@ -532,19 +538,65 @@ export default function CourseSearch({ embedded = false }: CourseSearchProps) {
     return new Map(data.labs.map((l) => [l.name, l]))
   }, [data])
 
-  const courseRelations = useMemo(() => {
+  const courseToJobsIndex = useMemo(() => {
+    if (!jobMapData || !data) return new Map<number, JobProfile[]>()
+    return buildCourseToJobsIndex(jobMapData.jobs, jobMapData.labCourseRows, data.courses)
+  }, [jobMapData, data])
+
+  const designJobIndex = useMemo(() => {
+    if (!curriculumData) return null
+    return buildDesignJobIndex(curriculumData.courseJobLinks)
+  }, [curriculumData])
+
+  const expandedRelations = useMemo((): CourseRelations | null => {
+    if (expandedCourseId == null || !data) return null
+    const c =
+      filtered.find((x) => x.id === expandedCourseId) ??
+      data.courses.find((x) => x.id === expandedCourseId)
+    if (!c) return null
+
     const teachers = facultyData?.teachers ?? []
     const jobs = jobMapData?.jobs ?? []
-    const rows = jobMapData?.labCourseRows ?? []
-    const map = new Map<number, { faculty: FacultyTeacher[]; jobs: JobProfile[] }>()
-    for (const c of filtered) {
-      map.set(c.id, {
-        faculty: facultyForCourse(c, teachers),
-        jobs: jobsForCourse(c, jobs, rows),
-      })
+    const jobList = mergeJobLists(
+      jobsForCourse(c, courseToJobsIndex, jobs),
+      jobsForCourseFromDesign(c, curriculumData, jobs, data.labs, designJobIndex ?? undefined),
+    )
+    const compCert = compCertData
+      ? compCertForCourse(c, jobList, compCertData, data.labs, jobs)
+      : { competitions: [] as CompetitionItem[], certificates: [] as CertificateItem[] }
+
+    return {
+      faculty: facultyForCourse(c, teachers),
+      jobs: jobList,
+      competitions: compCert.competitions,
+      certificates: compCert.certificates,
+      tracks: trackCoursesForCourse(c, curriculumData, data.labs),
     }
-    return map
-  }, [filtered, facultyData, jobMapData])
+  }, [
+    expandedCourseId,
+    filtered,
+    data,
+    facultyData,
+    jobMapData,
+    compCertData,
+    curriculumData,
+    courseToJobsIndex,
+    designJobIndex,
+  ])
+
+  const getRelations = useCallback(
+    (courseId: number): CourseRelations => {
+      if (expandedCourseId === courseId && expandedRelations) return expandedRelations
+      return {
+        faculty: [],
+        jobs: [],
+        competitions: [],
+        certificates: [],
+        tracks: [],
+      }
+    },
+    [expandedCourseId, expandedRelations],
+  )
 
   if (!data) return null
 
@@ -1073,20 +1125,30 @@ export default function CourseSearch({ embedded = false }: CourseSearchProps) {
       {view === 'list' ? (
         <div className="glass rounded-2xl overflow-hidden divide-y divide-warm-200/80">
           <p className="px-4 py-2 text-[11px] text-warm-500 bg-warm-50/80">
-            默认折叠 · 点击课程行展开详情，联动实训室、师资、岗位三表数据
+            默认折叠 · 点击课程行展开六元联动：实训室 · 师资 · 岗位 · 竞赛 · 证书
           </p>
-          {filtered.slice(0, 200).map((c) => (
+          {filtered.slice(0, 200).map((c) => {
+            const rel = getRelations(c.id)
+            return (
             <CourseAccordionItem
               key={c.id}
               course={c}
               lab={labByName.get(c.lab_name)}
-              faculty={courseRelations.get(c.id)?.faculty ?? []}
-              jobs={courseRelations.get(c.id)?.jobs ?? []}
+              faculty={rel.faculty}
+              jobs={rel.jobs}
+              competitions={rel.competitions}
+              certificates={rel.certificates}
+              tracks={rel.tracks}
+              compCertLoaded={!!compCertData}
+              jobsLoaded={!!jobMapData?.jobs.length}
+              curriculumLoaded={!!curriculumData}
               sharedCount={sharedMap.get(c.name) ?? 0}
               expanded={expandedCourseId === c.id}
               onToggle={() => setExpandedCourseId(expandedCourseId === c.id ? null : c.id)}
+              onFocus={() => setFocus({ kind: 'course', id: String(c.id), label: c.name, subtitle: c.lab_name })}
             />
-          ))}
+            )
+          })}
         </div>
       ) : (
 
@@ -1116,15 +1178,23 @@ export default function CourseSearch({ embedded = false }: CourseSearchProps) {
 
               {filtered.slice(0, 200).map((c) => {
                 const isExpanded = expandedCourseId === c.id
+                const rel = getRelations(c.id)
                 return (
                   <CourseTableRows
                     key={c.id}
                     course={c}
                     lab={labByName.get(c.lab_name)}
-                    faculty={courseRelations.get(c.id)?.faculty ?? []}
-                    jobs={courseRelations.get(c.id)?.jobs ?? []}
+                    faculty={rel.faculty}
+                    jobs={rel.jobs}
+                    competitions={rel.competitions}
+                    certificates={rel.certificates}
+                    tracks={rel.tracks}
+                    compCertLoaded={!!compCertData}
+                    jobsLoaded={!!jobMapData?.jobs.length}
+                    curriculumLoaded={!!curriculumData}
                     expanded={isExpanded}
                     onToggle={() => setExpandedCourseId(isExpanded ? null : c.id)}
+                    onFocus={() => setFocus({ kind: 'course', id: String(c.id), label: c.name, subtitle: c.lab_name })}
                   />
                 )
               })}
@@ -1162,23 +1232,37 @@ function CourseAccordionItem({
   lab,
   faculty,
   jobs,
+  competitions,
+  certificates,
+  tracks,
+  compCertLoaded,
+  jobsLoaded,
+  curriculumLoaded,
   sharedCount,
   expanded,
   onToggle,
+  onFocus,
 }: {
   course: Course
   lab?: Lab
   faculty: FacultyTeacher[]
   jobs: JobProfile[]
+  competitions: CompetitionItem[]
+  certificates: CertificateItem[]
+  tracks: CurriculumTrackCourse[]
+  compCertLoaded: boolean
+  jobsLoaded: boolean
+  curriculumLoaded: boolean
   sharedCount: number
   expanded: boolean
   onToggle: () => void
+  onFocus?: () => void
 }) {
   return (
     <div className={expanded ? 'bg-accent-primary/[0.03]' : ''}>
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => { onFocus?.(); onToggle(); }}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-warm-100/70 transition text-sm"
       >
         <span className="text-warm-400 shrink-0">
@@ -1199,7 +1283,18 @@ function CourseAccordionItem({
         {c.hours != null && <span className="text-[11px] text-warm-500 shrink-0">{c.hours}学时</span>}
       </button>
       {expanded && (
-        <CourseLinkedPanel course={c} lab={lab} faculty={faculty} jobs={jobs} />
+        <CourseLinkedPanel
+          course={c}
+          lab={lab}
+          faculty={faculty}
+          jobs={jobs}
+          competitions={competitions}
+          certificates={certificates}
+          tracks={tracks}
+          compCertLoaded={compCertLoaded}
+          jobsLoaded={jobsLoaded}
+          curriculumLoaded={curriculumLoaded}
+        />
       )}
     </div>
   )
@@ -1210,20 +1305,34 @@ function CourseTableRows({
   lab,
   faculty,
   jobs,
+  competitions,
+  certificates,
+  tracks,
+  compCertLoaded,
+  jobsLoaded,
+  curriculumLoaded,
   expanded,
   onToggle,
+  onFocus,
 }: {
   course: Course
   lab?: Lab
   faculty: FacultyTeacher[]
   jobs: JobProfile[]
+  competitions: CompetitionItem[]
+  certificates: CertificateItem[]
+  tracks: CurriculumTrackCourse[]
+  compCertLoaded: boolean
+  jobsLoaded: boolean
+  curriculumLoaded: boolean
   expanded: boolean
   onToggle: () => void
+  onFocus?: () => void
 }) {
   return (
     <>
       <tr
-        onClick={onToggle}
+        onClick={() => { onFocus?.(); onToggle(); }}
         className={`border-b border-warm-200 cursor-pointer transition ${expanded ? 'bg-accent-primary/5' : 'hover:bg-warm-100'}`}
       >
         <td className="p-2.5 font-medium">
@@ -1241,7 +1350,19 @@ function CourseTableRows({
       {expanded && (
         <tr className="border-b border-warm-200 bg-warm-50/80">
           <td colSpan={5} className="p-3">
-            <CourseLinkedPanel course={c} lab={lab} faculty={faculty} jobs={jobs} compact />
+            <CourseLinkedPanel
+              course={c}
+              lab={lab}
+              faculty={faculty}
+              jobs={jobs}
+              competitions={competitions}
+              certificates={certificates}
+              tracks={tracks}
+              compCertLoaded={compCertLoaded}
+              jobsLoaded={jobsLoaded}
+              curriculumLoaded={curriculumLoaded}
+              compact
+            />
           </td>
         </tr>
       )}
@@ -1254,18 +1375,33 @@ function CourseLinkedPanel({
   lab,
   faculty,
   jobs,
+  competitions,
+  certificates,
+  tracks,
+  compCertLoaded,
+  jobsLoaded,
+  curriculumLoaded,
   compact,
 }: {
   course: Course
   lab?: Lab
   faculty: FacultyTeacher[]
   jobs: JobProfile[]
+  competitions: CompetitionItem[]
+  certificates: CertificateItem[]
+  tracks: CurriculumTrackCourse[]
+  compCertLoaded: boolean
+  jobsLoaded: boolean
+  curriculumLoaded: boolean
   compact?: boolean
 }) {
   const vd = c.vendor_detail
+  const jobSlice = jobs.slice(0, 8)
+  const compSlice = competitions.slice(0, 6)
+  const certSlice = certificates.slice(0, 6)
   return (
     <div className={`px-3 pb-3 ${compact ? '' : 'pl-8'} animate-fade-in-up`}>
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <section className="rounded-xl border border-warm-300/80 bg-warm-50/60 p-3">
           <h4 className="text-[11px] font-semibold text-warm-600 mb-2 flex items-center gap-1">
             <BookOpen size={12} /> 课程详情
@@ -1329,6 +1465,9 @@ function CourseLinkedPanel({
           ) : (
             <p className="text-xs text-warm-500">暂无匹配师资（按实训室 / 可授课程关联）</p>
           )}
+          <Link to="/labs/faculty" className="text-[11px] text-accent-primary hover:underline mt-2 inline-block">
+            师资分析 →
+          </Link>
         </section>
 
         <section className="rounded-xl border border-warm-300/80 bg-warm-50/60 p-3">
@@ -1336,23 +1475,116 @@ function CourseLinkedPanel({
             <Briefcase size={12} /> 关联岗位
             <span className="font-normal text-warm-400">({jobs.length})</span>
           </h4>
-          {jobs.length > 0 ? (
-            <ul className="space-y-1">
-              {jobs.map((j) => (
-                <li key={j.id} className="text-xs">
-                  <span className="font-medium text-warm-800">{j.name}</span>
+          {jobSlice.length > 0 ? (
+            <ul className="space-y-1.5">
+              {jobSlice.map((j) => (
+                <li key={j.id}>
+                  <Link
+                    to={buildCrossNavUrl('/jobs', { job: j.name })}
+                    className="text-xs font-medium text-warm-800 hover:text-accent-primary"
+                  >
+                    {j.name}
+                  </Link>
                   <span className="text-[10px] text-warm-500 ml-1">{j.category}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-warm-500">暂无岗位映射关联</p>
+            <p className="text-xs text-warm-500">
+              {!jobsLoaded
+                ? '岗位映射未加载，请上传岗位 Excel'
+                : '岗位映射表未命中该课程名；可在综合匹配查看培养路径'}
+            </p>
           )}
           {vd?.jobs && <p className="text-[10px] text-warm-500 mt-2">厂商标注岗位：{vd.jobs}</p>}
-          <Link to="/jobs" className="text-[11px] text-accent-primary hover:underline mt-2 inline-block">
-            岗位技能图谱 →
+          {jobs.length > jobSlice.length && (
+            <p className="text-[10px] text-warm-400 mt-1">另有 {jobs.length - jobSlice.length} 个岗位未展示</p>
+          )}
+          <Link to={buildCrossNavUrl('/integrated', { lab: c.lab_name })} className="text-[11px] text-accent-primary hover:underline mt-2 inline-block">
+            综合匹配 · 岗位培养路径 →
           </Link>
         </section>
+
+        <section className="rounded-xl border border-warm-300/80 bg-warm-50/60 p-3">
+          <h4 className="text-[11px] font-semibold text-warm-600 mb-2 flex items-center gap-1">
+            <Trophy size={12} className="text-[#e65100]" /> 关联竞赛
+            <span className="font-normal text-warm-400">({competitions.length})</span>
+          </h4>
+          {!compCertLoaded ? (
+            <p className="text-xs text-warm-500">未加载竞赛·证书表</p>
+          ) : compSlice.length > 0 ? (
+            <ul className="space-y-1">
+              {compSlice.map((item) => (
+                <li key={item.id} className="text-xs">
+                  <Link
+                    to={buildCrossNavUrl('/labs/compcerts', { lab: c.lab_name })}
+                    className="text-[#bf360c] hover:underline font-medium"
+                  >
+                    {item.name}
+                  </Link>
+                  {item.rating && <span className="text-[10px] text-warm-500 ml-1">{item.rating}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-warm-500">所属实训室与关联岗位暂无竞赛映射</p>
+          )}
+          {competitions.length > compSlice.length && (
+            <p className="text-[10px] text-warm-400 mt-1">另有 {competitions.length - compSlice.length} 项</p>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-warm-300/80 bg-warm-50/60 p-3">
+          <h4 className="text-[11px] font-semibold text-warm-600 mb-2 flex items-center gap-1">
+            <Award size={12} className="text-[#00897b]" /> 关联证书
+            <span className="font-normal text-warm-400">({certificates.length})</span>
+          </h4>
+          {!compCertLoaded ? (
+            <p className="text-xs text-warm-500">未加载竞赛·证书表</p>
+          ) : certSlice.length > 0 ? (
+            <ul className="space-y-1">
+              {certSlice.map((item) => (
+                <li key={item.id} className="text-xs">
+                  <Link
+                    to={buildCrossNavUrl('/labs/compcerts', { lab: c.lab_name })}
+                    className="text-[#00695c] hover:underline font-medium"
+                  >
+                    {item.shortName || item.fullName}
+                  </Link>
+                  {item.org && <span className="text-[10px] text-warm-500 ml-1">{item.org}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-warm-500">所属实训室与关联岗位暂无证书映射</p>
+          )}
+          {certificates.length > certSlice.length && (
+            <p className="text-[10px] text-warm-400 mt-1">另有 {certificates.length - certSlice.length} 张</p>
+          )}
+          <Link to={buildCrossNavUrl('/labs/compcerts', { lab: c.lab_name })} className="text-[11px] text-accent-primary hover:underline mt-2 inline-block">
+            竞赛·证书中心 →
+          </Link>
+        </section>
+
+        {curriculumLoaded && tracks.length > 0 && (
+          <section className="rounded-xl border border-warm-300/80 bg-warm-50/60 p-3 md:col-span-2 xl:col-span-3">
+            <h4 className="text-[11px] font-semibold text-warm-600 mb-2 flex items-center gap-1">
+              <Layers size={12} /> 培养周期体系
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(['enterprise', 'internship', 'industry'] as const).map((track) => {
+                const items = tracks.filter((t) => t.track === track)
+                if (!items.length) return null
+                return (
+                  <div key={track} className="rounded-lg border border-warm-200 bg-white/80 p-2">
+                    <p className="text-[10px] font-semibold text-accent-primary">{TRAINING_TRACK_LABELS[track]}</p>
+                    <p className="text-[9px] text-warm-500 mt-0.5">{items[0].hours} · {items[0].materials.slice(0, 24)}…</p>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   )

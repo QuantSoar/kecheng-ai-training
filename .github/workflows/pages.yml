@@ -33,8 +33,26 @@ jobs:
       - name: Sync Excel data before build
         run: |
           mkdir -p frontend/public/data site/data
-          cp -f courses.xlsx faculty.xlsx jobs.xlsx frontend/public/data/
-          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/
+          cp -f courses.xlsx faculty.xlsx jobs.xlsx frontend/public/data/ 2>/dev/null || true
+          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/ 2>/dev/null || true
+          for f in courses*.xlsx faculty*.xlsx jobs*.xlsx *岗位*.xlsx; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              courses*|*课程*) cp -f "$f" frontend/public/data/courses.xlsx; cp -f "$f" site/data/courses.xlsx ;;
+              faculty*|*师资*) cp -f "$f" frontend/public/data/faculty.xlsx; cp -f "$f" site/data/faculty.xlsx ;;
+              jobs*|*岗位*) cp -f "$f" frontend/public/data/jobs.xlsx; cp -f "$f" site/data/jobs.xlsx ;;
+            esac
+          done
+          for f in certs.xlsx *竞赛*.xlsx *证书*.xlsx; do
+            [ -f "$f" ] || continue
+            cp -f "$f" frontend/public/data/certs.xlsx
+            cp -f "$f" site/data/certs.xlsx
+          done
+          for f in curriculum-design.xlsx *课程体系设计*.xlsx; do
+            [ -f "$f" ] || continue
+            cp -f "$f" frontend/public/data/curriculum-design.xlsx
+            cp -f "$f" site/data/curriculum-design.xlsx
+          done
           cp -f frontend/public/data/data-config.json site/data/ 2>/dev/null || true
 
       - name: Install & build site
@@ -46,7 +64,22 @@ jobs:
 
       - name: Ensure site data is latest
         run: |
-          cp -f courses.xlsx faculty.xlsx jobs.xlsx site/data/
+          for f in courses*.xlsx faculty*.xlsx jobs*.xlsx *岗位*.xlsx; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              courses*|*课程*) cp -f "$f" site/data/courses.xlsx ;;
+              faculty*|*师资*) cp -f "$f" site/data/faculty.xlsx ;;
+              jobs*|*岗位*) cp -f "$f" site/data/jobs.xlsx ;;
+            esac
+          done
+          for f in certs.xlsx *竞赛*.xlsx *证书*.xlsx; do
+            [ -f "$f" ] || continue
+            cp -f "$f" site/data/certs.xlsx
+          done
+          for f in curriculum-design.xlsx *课程体系设计*.xlsx; do
+            [ -f "$f" ] || continue
+            cp -f "$f" site/data/curriculum-design.xlsx
+          done
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

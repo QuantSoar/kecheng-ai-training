@@ -1,9 +1,9 @@
 import { TEMPLATE_DOWNLOADS, TEMPLATE_FILENAMES } from '../templates/spec'
 import { downloadCourseTemplate, downloadFacultyTemplate, downloadJobMapTemplate } from '../templates/generateTemplates'
 
-export type TemplateKind = 'course' | 'faculty' | 'jobMap'
+export type TemplateKind = 'course' | 'faculty' | 'jobMap' | 'compCert' | 'curriculumDesign'
 
-const GENERATORS: Record<TemplateKind, () => void> = {
+const GENERATORS: Partial<Record<TemplateKind, () => void>> = {
   course: downloadCourseTemplate,
   faculty: downloadFacultyTemplate,
   jobMap: downloadJobMapTemplate,
@@ -27,5 +27,5 @@ export async function downloadTemplate(kind: TemplateKind): Promise<void> {
     // fallback to client generation
   }
 
-  GENERATORS[kind]()
+  GENERATORS[kind]?.()
 }

@@ -1,42 +1,52 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Search, BookOpen, Users, AlertTriangle, Briefcase, Building2,
-  BarChart3, Target, Layers, ExternalLink, ChevronRight,
+  BookOpen, Users, AlertTriangle, Briefcase,
+  Layers, ExternalLink, Trophy, ChevronDown,
 } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useFaculty } from '../context/FacultyContext'
 import { useJobMap } from '../context/JobMapContext'
-import Chart, { warmChartBase, WARM_CHART } from '../components/Chart'
+import { useCompCert } from '../context/CompCertContext'
 import CourseDetailDrawer from '../components/CourseDetailDrawer'
+import JobMatchingFlow from '../components/JobMatchingFlow'
+import GapDiagnosisTable from '../components/GapDiagnosisTable'
 import { TYPE_COLORS, TYPE_LABELS } from '../types'
 import type { Course } from '../types'
 import type { FacultyTeacher } from '../types/faculty'
-import { selectClass, inputClass } from '../styles/form'
+import { selectClass } from '../styles/form'
+import { useCrossNavState, buildCrossNavUrl } from '../utils/crossNav'
+import { useEcosystem } from '../context/EcosystemContext'
 import {
   buildLabIntegrations,
-  buildJobIntegrationRows,
-  filterIntegrations,
   MATCH_COLORS,
-  MATCH_LEVEL_OPTIONS,
   facultyCanTeachCourse,
   type LabIntegration,
 } from '../utils/integrate'
 
-type ViewMode = 'lab' | 'job' | 'element' | 'gap'
+type LabScope = 'all' | 'attention' | 'low-map' | 'good'
 
-const VIEW_TABS: { id: ViewMode; label: string; icon: typeof Building2 }[] = [
-  { id: 'lab', label: '实训室维度', icon: Building2 },
-  { id: 'job', label: '岗位维度', icon: Briefcase },
-  { id: 'element', label: '要素对比', icon: BarChart3 },
-  { id: 'gap', label: '缺口诊断', icon: Target },
+const LAB_SCOPE_OPTIONS: { id: LabScope; label: string; needsFaculty?: boolean }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'attention', label: '待关注', needsFaculty: true },
+  { id: 'low-map', label: '映射偏低', needsFaculty: true },
+  { id: 'good', label: '匹配良好', needsFaculty: true },
 ]
 
-const TYPE_ORDER = ['general', 'foundation', 'core', 'practice'] as const
-
-function shortLab(name: string) {
-  return name.replace('实训室', '').replace('实验室', '')
+function labsInScope(items: LabIntegration[], scope: LabScope): LabIntegration[] {
+  if (scope === 'attention') {
+    return items.filter((i) => i.matchLevel === 'gap' || i.matchLevel === 'course-heavy' || i.strictCoveragePct < 40)
+  }
+  if (scope === 'low-map') {
+    return items.filter((i) => i.strictCoveragePct < 40)
+  }
+  if (scope === 'good') {
+    return items.filter((i) => i.matchLevel === 'good' || i.matchLevel === 'faculty-heavy')
+  }
+  return items
 }
+
+const TYPE_ORDER = ['general', 'foundation', 'core', 'practice'] as const
 
 function CoverageBar({ pct, label }: { pct: number; label: string }) {
   const color = pct >= 60 ? 'bg-accent-green' : pct >= 30 ? 'bg-accent-orange' : 'bg-red-400'
@@ -57,51 +67,56 @@ export default function IntegratedAnalysis() {
   const { data } = useData()
   const { data: facultyData } = useFaculty()
   const { data: jobMapData } = useJobMap()
+  const { data: compCertData } = useCompCert()
+  const { params, setParams } = useCrossNavState()
+  const { setFocus } = useEcosystem()
 
-  const [view, setView] = useState<ViewMode>('lab')
   const [lab, setLab] = useState('')
-  const [courseType, setCourseType] = useState('')
-  const [facultySource, setFacultySource] = useState('')
-  const [facultyLevel, setFacultyLevel] = useState('')
-  const [matchLevel, setMatchLevel] = useState<LabIntegration['matchLevel'] | ''>('')
-  const [q, setQ] = useState('')
-  const [selectedLab, setSelectedLab] = useState<string | null>(null)
+  const [labScope, setLabScope] = useState<LabScope>('all')
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
   const [selectedFaculty, setSelectedFaculty] = useState<FacultyTeacher | null>(null)
+
+  useEffect(() => {
+    if (params.lab) setLab(params.lab)
+  }, [])
+
+  useEffect(() => {
+    const nextLab = lab || undefined
+    const nextJob = params.job
+    if (nextLab !== params.lab || nextJob !== params.job) {
+      setParams({ lab: nextLab, job: nextJob }, true)
+    }
+  }, [lab])
 
   const integrations = useMemo(() => {
     if (!data) return []
     return buildLabIntegrations(data.labs, data.courses, facultyData?.teachers ?? [], {
       jobs: jobMapData?.jobs,
+      compCert: compCertData,
     })
-  }, [data, facultyData, jobMapData])
+  }, [data, facultyData, jobMapData, compCertData])
 
-  const filtered = useMemo(
-    () => filterIntegrations(integrations, { lab, courseType, facultySource, facultyLevel, matchLevel, q }),
-    [integrations, lab, courseType, facultySource, facultyLevel, matchLevel, q],
+  const scopedLabs = useMemo(
+    () => labsInScope(integrations, facultyData ? labScope : 'all'),
+    [integrations, labScope, facultyData],
   )
 
-  const activeLab = useMemo(() => {
-    const name = selectedLab ?? lab
-    if (!name) return null
-    return filtered.find((i) => i.lab.name === name) ?? integrations.find((i) => i.lab.name === name) ?? null
-  }, [selectedLab, lab, filtered, integrations])
+  useEffect(() => {
+    if (!lab) return
+    if (!scopedLabs.some((i) => i.lab.name === lab)) setLab('')
+  }, [lab, scopedLabs])
 
-  const jobRows = useMemo(() => {
-    if (!jobMapData || !data) return []
-    return buildJobIntegrationRows(
-      jobMapData.jobs,
-      jobMapData.labCourseRows,
-      data.courses,
-      facultyData?.teachers ?? [],
-      data.labs,
-    )
-  }, [jobMapData, data, facultyData])
+  const activeLab = useMemo(() => {
+    if (!lab) return null
+    return integrations.find((i) => i.lab.name === lab) ?? null
+  }, [lab, integrations])
 
   const summary = useMemo(() => {
     const totalCourses = data?.meta.total_courses ?? 0
     const totalFaculty = facultyData?.meta.total_teachers ?? 0
     const totalJobs = jobMapData?.meta.total_jobs ?? 0
+    const totalCompetitions = compCertData?.meta.total_competitions ?? 0
+    const totalCertificates = compCertData?.meta.total_certificates ?? 0
     const gapLabs = integrations.filter((i) => i.matchLevel === 'gap' || i.matchLevel === 'course-heavy').length
     const goodLabs = integrations.filter((i) => i.matchLevel === 'good' || i.matchLevel === 'faculty-heavy').length
     const avgCoverage = integrations.length
@@ -109,137 +124,8 @@ export default function IntegratedAnalysis() {
       : 0
     const totalShared = integrations.reduce((s, i) => s + i.sharedCourseCount, 0)
     const vendorTotal = data?.meta.total_vendor_courses ?? 0
-    return { totalCourses, totalFaculty, totalJobs, gapLabs, goodLabs, avgCoverage, totalShared, vendorTotal }
-  }, [data, facultyData, jobMapData, integrations])
-
-  const compareChart = useMemo(() => {
-    const items = [...integrations]
-      .filter((i) => i.courses.length > 0 || i.faculty.length > 0)
-      .sort((a, b) => b.courses.length - a.courses.length)
-      .slice(0, 14)
-      .reverse()
-    if (!items.length) return {}
-    return {
-      ...warmChartBase(),
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['课程', '师资', '关联岗位'], top: 0, textStyle: { color: WARM_CHART.muted, fontSize: 10 } },
-      grid: { left: 120, right: 16, top: 36, bottom: 12 },
-      xAxis: { type: 'value', splitLine: { lineStyle: { color: WARM_CHART.splitLine } } },
-      yAxis: {
-        type: 'category',
-        data: items.map((i) => shortLab(i.lab.name)),
-        axisLabel: { fontSize: 9, color: WARM_CHART.muted },
-      },
-      series: [
-        { name: '课程', type: 'bar', data: items.map((i) => i.courses.length), itemStyle: { color: WARM_CHART.primary, borderRadius: [0, 2, 2, 0] } },
-        { name: '师资', type: 'bar', data: items.map((i) => i.faculty.length), itemStyle: { color: WARM_CHART.nodeLab, borderRadius: [0, 2, 2, 0] } },
-        { name: '关联岗位', type: 'bar', data: items.map((i) => i.jobCount), itemStyle: { color: '#b8860b', borderRadius: [0, 2, 2, 0] } },
-      ],
-    }
-  }, [integrations])
-
-  const matchStatusPie = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const i of integrations) {
-      counts.set(i.matchLabel, (counts.get(i.matchLabel) ?? 0) + 1)
-    }
-    const data = [...counts.entries()].map(([name, value]) => ({ name, value }))
-    if (!data.length) return {}
-    return {
-      ...warmChartBase(),
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      series: [{
-        type: 'pie',
-        radius: ['40%', '68%'],
-        center: ['50%', '52%'],
-        label: { fontSize: 10, color: WARM_CHART.muted },
-        data,
-      }],
-    }
-  }, [integrations])
-
-  const coverageBarChart = useMemo(() => {
-    const items = [...integrations]
-      .filter((i) => i.courses.length > 0)
-      .sort((a, b) => a.strictCoveragePct - b.strictCoveragePct)
-      .slice(-12)
-    if (!items.length) return {}
-    return {
-      ...warmChartBase(),
-      grid: { left: 100, right: 16, top: 8, bottom: 8 },
-      tooltip: { formatter: '{b}: {c}%' },
-      xAxis: { type: 'value', max: 100, splitLine: { lineStyle: { color: WARM_CHART.splitLine } } },
-      yAxis: {
-        type: 'category',
-        data: items.map((i) => shortLab(i.lab.name)),
-        axisLabel: { fontSize: 9, color: WARM_CHART.muted },
-      },
-      series: [{
-        type: 'bar',
-        data: items.map((i) => ({
-          value: i.strictCoveragePct,
-          itemStyle: {
-            color: i.strictCoveragePct >= 60 ? WARM_CHART.nodeLab : i.strictCoveragePct >= 30 ? WARM_CHART.primary : '#e57373',
-            borderRadius: [0, 4, 4, 0],
-          },
-        })),
-      }],
-    }
-  }, [integrations])
-
-  const typeStackChart = useMemo(() => {
-    const items = [...integrations].sort((a, b) => b.courses.length - a.courses.length).slice(0, 10).reverse()
-    if (!items.length) return {}
-    return {
-      ...warmChartBase(),
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { data: TYPE_ORDER.map((t) => TYPE_LABELS[t]), top: 0, textStyle: { fontSize: 9, color: WARM_CHART.muted } },
-      grid: { left: 100, right: 12, top: 32, bottom: 8 },
-      xAxis: { type: 'value', splitLine: { lineStyle: { color: WARM_CHART.splitLine } } },
-      yAxis: {
-        type: 'category',
-        data: items.map((i) => shortLab(i.lab.name)),
-        axisLabel: { fontSize: 9, color: WARM_CHART.muted },
-      },
-      series: TYPE_ORDER.map((t) => ({
-        name: TYPE_LABELS[t],
-        type: 'bar',
-        stack: 'type',
-        data: items.map((i) => i.courseTypes[t] ?? 0),
-        itemStyle: { color: TYPE_COLORS[t] },
-      })),
-    }
-  }, [integrations])
-
-  const scatterChart = useMemo(() => {
-    const items = integrations.filter((i) => i.courses.length > 0 || i.faculty.length > 0)
-    if (!items.length) return {}
-    return {
-      ...warmChartBase(),
-      tooltip: {
-        formatter: (p: { data: number[]; name?: string }) => {
-          const [x, y, jobs] = p.data
-          return `${p.name}<br/>课程 ${x} · 师资 ${y}<br/>岗位 ${jobs}`
-        },
-      },
-      grid: { left: 48, right: 24, top: 16, bottom: 40 },
-      xAxis: { name: '课程', nameLocation: 'middle', nameGap: 28, splitLine: { lineStyle: { color: WARM_CHART.splitLine } } },
-      yAxis: { name: '师资', splitLine: { lineStyle: { color: WARM_CHART.splitLine } } },
-      series: [{
-        type: 'scatter',
-        symbolSize: (val: number[]) => Math.max(12, Math.min(36, 8 + val[2] * 4)),
-        data: items.map((i) => ({
-          name: shortLab(i.lab.name),
-          value: [i.courses.length, i.faculty.length, i.jobCount],
-          itemStyle: {
-            color: i.matchLevel === 'good' || i.matchLevel === 'faculty-heavy' ? WARM_CHART.nodeLab
-              : i.matchLevel === 'gap' ? '#e57373' : WARM_CHART.primary,
-            opacity: 0.85,
-          },
-        })),
-      }],
-    }
-  }, [integrations])
+    return { totalCourses, totalFaculty, totalJobs, totalCompetitions, totalCertificates, gapLabs, goodLabs, avgCoverage, totalShared, vendorTotal }
+  }, [data, facultyData, jobMapData, compCertData, integrations])
 
   const gapItems = useMemo(
     () => integrations
@@ -248,33 +134,21 @@ export default function IntegratedAnalysis() {
     [integrations],
   )
 
-  const resetFilters = () => {
-    setLab('')
-    setCourseType('')
-    setFacultySource('')
-    setFacultyLevel('')
-    setMatchLevel('')
-    setQ('')
-    setSelectedLab(null)
+  const scopeCounts = useMemo(() => ({
+    all: integrations.length,
+    attention: labsInScope(integrations, 'attention').length,
+    'low-map': labsInScope(integrations, 'low-map').length,
+    good: labsInScope(integrations, 'good').length,
+  }), [integrations])
+
+  const scrollToGap = () => {
+    document.getElementById('gap-diagnosis')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   if (!data) return null
 
-  const sourceOptions = facultyData
-    ? [...new Set(facultyData.teachers.map((t) => t.source).filter(Boolean))]
-    : []
-
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold text-gradient">综合匹配分析</h1>
-        <p className="text-warm-600 mt-1 text-sm">
-          实训室 · 岗位 · 课程 · 师资 多维度联动 · {data.meta.total_labs} 实训室
-          {facultyData ? ` · ${facultyData.meta.total_teachers} 师资` : ''}
-          {jobMapData ? ` · ${jobMapData.meta.total_jobs} 岗位` : ''}
-        </p>
-      </header>
-
       {!facultyData && (
         <div className="glass rounded-xl p-4 flex items-center gap-3 border border-accent-orange/30 bg-accent-orange/5">
           <AlertTriangle className="text-accent-orange shrink-0" size={20} />
@@ -286,6 +160,13 @@ export default function IntegratedAnalysis() {
         <div className="glass rounded-xl p-4 flex items-center gap-3 border border-warm-300">
           <Briefcase className="text-warm-500 shrink-0" size={20} />
           <p className="text-sm text-warm-600">岗位映射未加载，岗位维度与关联岗位统计不可用。请上传岗位 Excel 或放置 jobs.xlsx。</p>
+        </div>
+      )}
+
+      {!compCertData && (
+        <div className="glass rounded-xl p-4 flex items-center gap-3 border border-warm-300">
+          <Trophy className="text-warm-500 shrink-0" size={20} />
+          <p className="text-sm text-warm-600">竞赛·证书表未加载，竞赛/证书联动不可用。请上传第四张 Excel 或放置 certs.xlsx。</p>
         </div>
       )}
 
@@ -307,266 +188,64 @@ export default function IntegratedAnalysis() {
         ))}
       </div>
 
-      <nav className="flex flex-wrap gap-2 p-1 rounded-xl bg-warm-100/80 border border-warm-300 w-fit">
-        {VIEW_TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setView(id)}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              view === id
-                ? 'bg-white text-accent-primary shadow-sm border border-accent-primary/20'
-                : 'text-warm-600 hover:text-warm-900 hover:bg-warm-50'
-            }`}
-          >
-            <Icon size={16} />
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="glass rounded-2xl p-4 space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-warm-400" size={18} />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索课程、厂商、师资、专业领域…"
-            className={`${inputClass} pl-10 rounded-xl`}
-          />
+      <div className="glass rounded-xl p-3 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-warm-500 shrink-0">聚焦实训室</span>
+          <div className="relative min-w-[12rem]">
+            <select
+              value={lab}
+              onChange={(e) => setLab(e.target.value)}
+              className={`${selectClass} w-full pr-8`}
+            >
+              <option value="">选择实训室查看详情…</option>
+              {scopedLabs.map((i) => (
+                <option key={i.lab.id} value={i.lab.name}>
+                  {i.lab.name.replace('实训室', '').replace('实验室', '')}
+                  {facultyData ? ` · 映射 ${i.strictCoveragePct}%` : ` · ${i.courses.length} 门课`}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-warm-400 pointer-events-none" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {LAB_SCOPE_OPTIONS.map(({ id, label, needsFaculty }) => {
+              const disabled = needsFaculty && !facultyData
+              const active = labScope === id
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setLabScope(id)}
+                  title={disabled ? '需加载师资数据' : undefined}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition border ${
+                    active
+                      ? 'bg-accent-primary/15 text-accent-primary border-accent-primary/35'
+                      : 'glass text-warm-600 border-warm-300 hover:text-warm-900 disabled:opacity-40 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {label}
+                  <span className="ml-1 tabular-nums opacity-75">{scopeCounts[id]}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <select value={lab} onChange={(e) => { setLab(e.target.value); setSelectedLab(e.target.value || null) }} className={selectClass}>
-            <option value="">全部实训室</option>
-            {data.labs.map((l) => (
-              <option key={l.id} value={l.name}>{l.name}</option>
-            ))}
-          </select>
-          <select value={courseType} onChange={(e) => setCourseType(e.target.value)} className={selectClass}>
-            <option value="">全部课程类型</option>
-            {Object.entries(TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <select value={matchLevel} onChange={(e) => setMatchLevel(e.target.value as LabIntegration['matchLevel'] | '')} className={selectClass}>
-            {MATCH_LEVEL_OPTIONS.map((o) => (
-              <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          {facultyData && (
-            <>
-              <select value={facultySource} onChange={(e) => setFacultySource(e.target.value)} className={selectClass}>
-                <option value="">全部师资来源</option>
-                {sourceOptions.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-              <select value={facultyLevel} onChange={(e) => setFacultyLevel(e.target.value)} className={selectClass}>
-                <option value="">全部师资级别</option>
-                <option value="高">高</option>
-                <option value="中">中</option>
-                <option value="低">低</option>
-              </select>
-            </>
-          )}
-          <button type="button" onClick={resetFilters} className="px-3 py-2 rounded-lg text-sm glass text-warm-600 hover:text-warm-900">
-            重置
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 border-t border-warm-200 text-xs">
+          <span className="text-warm-500 shrink-0">快捷入口</span>
+          <Link to="/labs" className="text-accent-primary hover:underline">实训室全景</Link>
+          <Link to="/jobs" className="text-accent-primary hover:underline">岗位图谱</Link>
+          <Link to="/network" className="text-accent-primary hover:underline">课程图谱</Link>
+          <button type="button" onClick={scrollToGap} className="text-accent-orange hover:underline">
+            缺口诊断{gapItems.length > 0 ? `（${gapItems.length} 室）` : ''}
           </button>
+          {lab && (
+            <button type="button" onClick={() => setLab('')} className="text-warm-500 hover:text-warm-800 ml-auto">
+              清除选中
+            </button>
+          )}
         </div>
       </div>
-
-      {view === 'lab' && (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 glass rounded-2xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-warm-300">
-              <h3 className="text-sm font-semibold text-warm-700">实训室要素匹配总览</h3>
-              <p className="text-xs text-warm-500">点击行查看详情 · 含岗位关联与课师映射率</p>
-            </div>
-            <div className="overflow-x-auto max-h-[440px] overflow-y-auto scrollbar-thin">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-warm-50/95 backdrop-blur z-10">
-                  <tr className="border-b border-warm-300 text-warm-500 text-left text-xs">
-                    <th className="p-2.5">实训室</th>
-                    <th className="p-2.5">课程</th>
-                    <th className="p-2.5">师资</th>
-                    <th className="p-2.5">岗位</th>
-                    <th className="p-2.5">课师映射</th>
-                    <th className="p-2.5">厂商课</th>
-                    <th className="p-2.5">状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((item) => (
-                    <tr
-                      key={item.lab.id}
-                      onClick={() => setSelectedLab(item.lab.name)}
-                      className={`border-b border-warm-200 cursor-pointer transition text-xs ${
-                        (selectedLab ?? lab) === item.lab.name ? 'bg-accent-primary/10' : 'hover:bg-warm-100'
-                      }`}
-                    >
-                      <td className="p-2.5 font-medium max-w-[180px]">
-                        <span className="text-warm-400 mr-1">#{item.lab.id}</span>
-                        {shortLab(item.lab.name)}
-                      </td>
-                      <td className="p-2.5 text-accent-primary font-bold">{item.courses.length}</td>
-                      <td className="p-2.5 text-accent-green font-bold">{item.faculty.length}</td>
-                      <td className="p-2.5 text-warm-700">{item.jobCount || '—'}</td>
-                      <td className="p-2.5">
-                        <span className={item.strictCoveragePct >= 60 ? 'text-accent-green' : item.strictCoveragePct >= 30 ? 'text-accent-orange' : 'text-red-500'}>
-                          {facultyData ? `${item.strictCoveragePct}%` : '—'}
-                        </span>
-                      </td>
-                      <td className="p-2.5 text-warm-600">{item.vendorCourses}</td>
-                      <td className="p-2.5">
-                        <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${MATCH_COLORS[item.matchLevel]}`}>
-                          {item.matchLabel}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="space-y-4">
-            <div className="glass rounded-2xl p-4">
-              <h3 className="text-sm text-warm-600 mb-2">课程 · 师资 · 岗位对比</h3>
-              <Chart option={compareChart} height={200} />
-            </div>
-            <div className="glass rounded-2xl p-4">
-              <h3 className="text-sm text-warm-600 mb-2">匹配状态分布</h3>
-              <Chart option={matchStatusPie} height={180} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {view === 'job' && (
-        <div className="glass rounded-2xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-warm-300 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-warm-700">岗位培养资源完备度</h3>
-              <p className="text-xs text-warm-500">岗位 → 实训室 → 课程入库率 → 师资覆盖</p>
-            </div>
-            <Link to="/jobs" className="text-xs text-accent-primary hover:underline inline-flex items-center gap-1">
-              岗位图谱 <ExternalLink size={12} />
-            </Link>
-          </div>
-          {!jobMapData ? (
-            <p className="p-8 text-center text-warm-500 text-sm">请先加载岗位映射数据</p>
-          ) : (
-            <div className="overflow-x-auto max-h-[480px] overflow-y-auto scrollbar-thin">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-warm-50/95 backdrop-blur">
-                  <tr className="border-b border-warm-300 text-warm-500 text-left text-xs">
-                    <th className="p-3">岗位</th>
-                    <th className="p-3">大类</th>
-                    <th className="p-3">实训室</th>
-                    <th className="p-3">推荐课程</th>
-                    <th className="p-3">已入库</th>
-                    <th className="p-3">师资</th>
-                    <th className="p-3">完备度</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobRows.map((row) => (
-                    <tr key={row.job.name} className="border-b border-warm-200 hover:bg-warm-50 text-xs">
-                      <td className="p-3 font-medium">
-                        <Link to="/jobs" className="text-accent-primary hover:underline">{row.job.name}</Link>
-                      </td>
-                      <td className="p-3 text-warm-600">{row.job.category}</td>
-                      <td className="p-3">{row.labCount}</td>
-                      <td className="p-3">{row.courseNames}</td>
-                      <td className="p-3 text-accent-primary font-medium">{row.matchedCourses}</td>
-                      <td className="p-3 text-accent-green">{row.facultyCount}</td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2 min-w-[100px]">
-                          <div className="flex-1 h-1.5 rounded-full bg-warm-200 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${row.completenessPct >= 70 ? 'bg-accent-green' : row.completenessPct >= 40 ? 'bg-accent-orange' : 'bg-red-400'}`}
-                              style={{ width: `${row.completenessPct}%` }}
-                            />
-                          </div>
-                          <span className="text-[10px] text-warm-500 w-8">{row.completenessPct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {view === 'element' && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="glass rounded-2xl p-4">
-            <h3 className="text-sm font-semibold text-warm-700 mb-1">课程 × 师资 散点分布</h3>
-            <p className="text-[11px] text-warm-500 mb-2">气泡大小 = 关联岗位数 · 颜色反映匹配状态</p>
-            <Chart option={scatterChart} height={280} />
-          </div>
-          <div className="glass rounded-2xl p-4">
-            <h3 className="text-sm font-semibold text-warm-700 mb-1">课师映射覆盖率</h3>
-            <p className="text-[11px] text-warm-500 mb-2">有明确可授教师的课程占比（capable_courses 匹配）</p>
-            <Chart option={coverageBarChart} height={280} />
-          </div>
-          <div className="col-span-2 glass rounded-2xl p-4">
-            <h3 className="text-sm font-semibold text-warm-700 mb-1">课程类型结构（TOP 10 实训室）</h3>
-            <Chart option={typeStackChart} height={260} />
-          </div>
-        </div>
-      )}
-
-      {view === 'gap' && (
-        <div className="space-y-3">
-          <p className="text-sm text-warm-600">
-            共 {gapItems.length} 个实训室存在师资缺口、课程偏重或课师映射偏弱（&lt;40%），建议优先改善。
-          </p>
-          {gapItems.length === 0 ? (
-            <div className="glass rounded-xl p-8 text-center text-accent-green text-sm">当前无明显缺口项，整体匹配良好</div>
-          ) : (
-            gapItems.map((item) => (
-              <button
-                key={item.lab.id}
-                type="button"
-                onClick={() => { setSelectedLab(item.lab.name); setView('lab') }}
-                className="w-full text-left glass rounded-xl p-4 border border-warm-300 hover:border-accent-primary/30 transition"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-bold text-warm-900">{item.lab.name}</p>
-                    <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded border ${MATCH_COLORS[item.matchLevel]}`}>
-                      {item.matchLabel}
-                    </span>
-                  </div>
-                  <ChevronRight className="text-warm-400 shrink-0" size={18} />
-                </div>
-                <div className="grid sm:grid-cols-4 gap-3 mt-3 text-xs">
-                  <div><span className="text-warm-500">课程</span> <strong>{item.courses.length}</strong></div>
-                  <div><span className="text-warm-500">师资</span> <strong className="text-accent-green">{item.faculty.length}</strong></div>
-                  <div><span className="text-warm-500">课师映射</span> <strong>{item.strictCoveragePct}%</strong></div>
-                  <div><span className="text-warm-500">关联岗位</span> <strong>{item.jobCount}</strong></div>
-                </div>
-                <ul className="mt-2 text-[11px] text-warm-600 space-y-0.5 list-disc list-inside">
-                  {item.faculty.length < 3 && item.courses.length >= 10 && (
-                    <li>师资仅 {item.faculty.length} 人，难以覆盖 {item.courses.length} 门课程</li>
-                  )}
-                  {item.strictCoveragePct < 40 && facultyData && (
-                    <li>仅 {item.strictCoveragePct}% 课程有明确可授教师，建议补充 capable_courses 映射</li>
-                  )}
-                  {item.vendorRatioPct > 50 && (
-                    <li>厂商课占比 {item.vendorRatioPct}%，需关注高校师资对厂商课的承接能力</li>
-                  )}
-                  {item.jobCount > 0 && item.strictCoveragePct < 50 && (
-                    <li>关联 {item.jobCount} 个岗位，但课师映射偏弱，影响岗位培养落地</li>
-                  )}
-                </ul>
-              </button>
-            ))
-          )}
-        </div>
-      )}
 
       {activeLab && (
         <div className="glass rounded-2xl p-5 space-y-4 animate-fade-in-up border border-accent-primary/15">
@@ -586,8 +265,32 @@ export default function IntegratedAnalysis() {
               <Link to={`/labs/${activeLab.lab.id}`} className="text-xs px-3 py-1.5 rounded-lg bg-warm-100 text-accent-primary hover:bg-warm-200 inline-flex items-center gap-1">
                 实训室详情 <ExternalLink size={12} />
               </Link>
+              <Link to={buildCrossNavUrl('/network', { lab: activeLab.lab.name })} className="text-xs px-3 py-1.5 rounded-lg bg-warm-100 text-accent-primary hover:bg-warm-200 inline-flex items-center gap-1">
+                课程图谱 <ExternalLink size={12} />
+              </Link>
+              <Link to={buildCrossNavUrl('/labs/compcerts', { lab: activeLab.lab.name })} className="text-xs px-3 py-1.5 rounded-lg bg-warm-100 text-accent-primary hover:bg-warm-200 inline-flex items-center gap-1">
+                竞赛·证书 <ExternalLink size={12} />
+              </Link>
             </div>
           </div>
+
+          {(activeLab.competitionCount > 0 || activeLab.certificateCount > 0) && (
+            <div className="flex flex-wrap gap-4 text-xs">
+              {activeLab.competitionCount > 0 && (
+                <div>
+                  <p className="text-warm-500 mb-1">关联赛事 {activeLab.competitionCount}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {activeLab.linkedCompetitions.slice(0, 5).map((c) => (
+                      <span key={c} className="px-2 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-100">{c}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {activeLab.certificateCount > 0 && (
+                <p className="text-teal-700">关联证书 {activeLab.certificateCount} 张</p>
+              )}
+            </div>
+          )}
 
           <div className="grid sm:grid-cols-3 gap-4">
             <CoverageBar pct={activeLab.strictCoveragePct} label="课师映射覆盖率" />
@@ -605,7 +308,7 @@ export default function IntegratedAnalysis() {
                 {activeLab.linkedJobs.map((j) => (
                   <Link
                     key={j}
-                    to="/jobs"
+                    to={buildCrossNavUrl('/jobs', { job: j, lab: activeLab.lab.name })}
                     className="text-[11px] px-2 py-1 rounded-lg bg-accent-primary/10 text-accent-primary border border-accent-primary/15 hover:bg-accent-primary/15"
                   >
                     {j}
@@ -665,7 +368,10 @@ export default function IntegratedAnalysis() {
                   return (
                     <button
                       key={c.id}
-                      onClick={() => setSelectedCourse(c)}
+                      onClick={() => {
+                        setSelectedCourse(c)
+                        setFocus({ kind: 'course', id: String(c.id), label: c.name, subtitle: c.lab_name })
+                      }}
                       className={`w-full text-left p-3 rounded-xl bg-warm-100 hover:bg-warm-200 transition border-l-2 ${
                         c.is_vendor ? 'border-l-accent-orange' : 'border-l-transparent'
                       }`}
@@ -696,7 +402,10 @@ export default function IntegratedAnalysis() {
                 ) : activeLab.faculty.map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => setSelectedFaculty(t)}
+                    onClick={() => {
+                      setSelectedFaculty(t)
+                      setFocus({ kind: 'faculty', id: String(t.id), label: t.name, subtitle: t.level })
+                    }}
                     className="w-full text-left p-3 rounded-xl bg-warm-100 hover:bg-warm-200 transition"
                   >
                     <div className="flex items-center justify-between">
@@ -714,6 +423,12 @@ export default function IntegratedAnalysis() {
           </div>
         </div>
       )}
+
+      <JobMatchingFlow />
+
+      <div id="gap-diagnosis">
+        <GapDiagnosisTable items={gapItems} facultyLoaded={!!facultyData} />
+      </div>
 
       <CourseDetailDrawer course={selectedCourse} onClose={() => setSelectedCourse(null)} />
 

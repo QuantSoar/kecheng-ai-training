@@ -5,10 +5,14 @@ export interface DataManagementActions {
   onUploadCourse: (file: File) => Promise<void>
   onUploadFaculty: (file: File) => Promise<void>
   onUploadJobMap: (file: File) => Promise<DataMode>
+  onUploadCompCert: (file: File) => Promise<DataMode>
+  onUploadCurriculum: (file: File) => Promise<void>
   onReload: () => Promise<void>
   courseMode: DataMode
   facultyMode: DataMode
   jobMapMode: DataMode
+  compCertMode: DataMode
+  curriculumMode: DataMode
 }
 
 export const DataManagementContext = createContext<DataManagementActions | null>(null)

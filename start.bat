@@ -34,20 +34,20 @@ for /L %%i in (1,1,30) do (
 
 :open_browser
 if !READY!==1 (
-  echo [3/3] 前端已就绪，打开浏览器...
-  start "" "http://localhost:5173/"
+  echo [3/3] 前端已就绪，用系统浏览器打开（勿用 Cursor 内嵌预览）...
+  start "" "http://127.0.0.1:5173/"
 ) else (
   echo [3/3] 前端尚未就绪，请查看「Kecheng-Web」窗口是否有报错
-  echo       就绪后手动访问: http://localhost:5173/
+  echo       就绪后运行 open-dev.bat 或手动访问: http://127.0.0.1:5173/
 )
 
 echo.
 echo ========================================
 echo   开发模式（原项目）
 echo ========================================
-echo   总览:     http://localhost:5173/
-echo   岗位图谱: http://localhost:5173/#/jobs
-echo   大屏:     http://localhost:5173/#/demo
+echo   总览:     http://127.0.0.1:5173/
+echo   岗位图谱: http://127.0.0.1:5173/#/jobs
+echo   大屏:     http://127.0.0.1:5173/#/demo
 echo   后端文档: http://127.0.0.1:8000/docs
 echo.
 echo   若 5173 无法访问:

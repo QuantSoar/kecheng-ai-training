@@ -107,3 +107,44 @@ export function jobLinkStats(
     faculty: facultyForJob(job, teachers, labs).length,
   }
 }
+
+/** 反向查：哪些岗位的培养路径包含该课程（与 matchJobCourses 同一套名称对齐规则） */
+export function buildCourseToJobsIndex(
+  jobs: JobProfile[],
+  labCourseRows: LabJobCourseRow[],
+  courses: Course[],
+): Map<number, JobProfile[]> {
+  const map = new Map<number, JobProfile[]>()
+  for (const job of jobs) {
+    for (const c of matchJobCourses(job, labCourseRows, courses)) {
+      if (!map.has(c.id)) map.set(c.id, [])
+      const arr = map.get(c.id)!
+      if (!arr.some((j) => j.id === job.id)) arr.push(job)
+    }
+  }
+  return map
+}
+
+export function jobsForCourse(
+  course: Course,
+  courseToJobs: Map<number, JobProfile[]>,
+  allJobs: JobProfile[],
+): JobProfile[] {
+  const matched = new Map<string, JobProfile>()
+  for (const job of courseToJobs.get(course.id) ?? []) {
+    matched.set(job.name, job)
+  }
+  if (course.vendor_detail?.jobs) {
+    const hints = course.vendor_detail.jobs.split(/[,，、;/\n]+/).map((s) => s.trim()).filter(Boolean)
+    for (const job of allJobs) {
+      const jn = norm(job.name)
+      if (hints.some((h) => {
+        const nh = norm(h)
+        return jn === nh || jn.includes(nh) || nh.includes(jn)
+      })) {
+        matched.set(job.name, job)
+      }
+    }
+  }
+  return [...matched.values()]
+}

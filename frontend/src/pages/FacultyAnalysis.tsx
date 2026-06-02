@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Users, Building2, Award, TrendingUp, Search, ChevronDown, ChevronRight } from 'lucide-react'
 import Chart, { warmChartBase, WARM_CHART } from '../components/Chart'
 import { useFaculty } from '../context/FacultyContext'
+import { useEcosystem } from '../context/EcosystemContext'
 import { FACULTY_CHART_COLORS, FACULTY_DIM_OPTIONS } from '../types/faculty'
 import type { FacultyStatItem, FacultyTeacher } from '../types/faculty'
 import { selectClass, inputClass } from '../styles/form'
@@ -14,8 +15,9 @@ function isLabStats(items: unknown): items is { lab: string; count: number; rati
   return Array.isArray(items) && items.length > 0 && 'lab' in items[0]
 }
 
-export default function FacultyAnalysis() {
+export default function FacultyAnalysis({ embedded = false }: { embedded?: boolean }) {
   const { data, loading, error } = useFaculty()
+  const { setFocus } = useEcosystem()
   const [dimension, setDimension] = useState('source')
   const [filterSource, setFilterSource] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
@@ -136,10 +138,15 @@ export default function FacultyAnalysis() {
   if (!data) {
     return (
       <div className="space-y-4">
-        <header>
-          <h1 className="text-2xl font-bold text-gradient">师资多维分析</h1>
-          <p className="text-warm-600 mt-2">请前往「数据管理」下载师资模板填写后上传，或将 xlsx 放到 data/ 目录后重新加载</p>
-        </header>
+        {!embedded && (
+          <header>
+            <h1 className="text-2xl font-bold text-gradient">师资多维分析</h1>
+            <p className="text-warm-600 mt-2">请前往「数据管理」下载师资模板填写后上传，或将 xlsx 放到 data/ 目录后重新加载</p>
+          </header>
+        )}
+        {embedded && (
+          <p className="text-sm text-warm-600">请前往「数据管理」上传师资 Excel，或将 xlsx 放到 data/ 目录后重新加载</p>
+        )}
         {error && (
           <div className="glass rounded-xl p-4 text-sm text-warm-600 border border-warm-300">
             {error !== 'Not Found' ? error : '尚未加载师资数据'}
@@ -161,13 +168,20 @@ export default function FacultyAnalysis() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-gradient">师资多维分析</h1>
-        <p className="text-warm-600 mt-1">
+      {!embedded ? (
+        <header>
+          <h1 className="text-2xl font-bold text-gradient">师资多维分析</h1>
+          <p className="text-warm-600 mt-1">
+            {data.meta.total_teachers} 位师资 · 覆盖 {data.meta.total_labs} 个实训室
+            {data.meta.source_file && <span className="text-warm-400"> · {data.meta.source_file}</span>}
+          </p>
+        </header>
+      ) : (
+        <p className="text-sm text-warm-600 -mt-1">
           {data.meta.total_teachers} 位师资 · 覆盖 {data.meta.total_labs} 个实训室
           {data.meta.source_file && <span className="text-warm-400"> · {data.meta.source_file}</span>}
         </p>
-      </header>
+      )}
 
       <div className="grid grid-cols-4 gap-4">
         {kpis.map(({ label, value, icon: Icon, color }) => (
@@ -221,7 +235,11 @@ export default function FacultyAnalysis() {
               <div
                 key={t.rank}
                 className="flex items-start gap-3 p-3 rounded-xl bg-warm-100 hover:bg-warm-200 transition cursor-pointer"
-                onClick={() => setSelected(data.teachers.find((x) => x.name === t.name) ?? null)}
+                onClick={() => {
+                  const teacher = data.teachers.find((x) => x.name === t.name) ?? null
+                  setSelected(teacher)
+                  if (teacher) setFocus({ kind: 'faculty', id: String(teacher.id), label: teacher.name, subtitle: teacher.level })
+                }}
               >
                 <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
                   (t.priority_score ?? 0) >= 60 ? 'bg-accent-primary/20 text-accent-primary' : 'bg-warm-200 text-warm-600'
@@ -316,6 +334,7 @@ export default function FacultyAnalysis() {
                         teacher={t}
                         expanded={isExpanded}
                         onToggle={() => setExpandedRowId(isExpanded ? null : t.id)}
+                        onFocus={() => setFocus({ kind: 'faculty', id: String(t.id), label: t.name, subtitle: t.level })}
                       />
                     )
                   })}
@@ -405,10 +424,12 @@ function TeacherRow({
   teacher: t,
   expanded,
   onToggle,
+  onFocus,
 }: {
   teacher: FacultyTeacher
   expanded: boolean
   onToggle: () => void
+  onFocus?: () => void
 }) {
   const recommender = [t.recommender_type, t.recommender].filter(Boolean).join(' / ') || '—'
   const cert = t.vendor_cert || t.cert_category || '—'
@@ -416,7 +437,7 @@ function TeacherRow({
   return (
     <>
       <tr
-        onClick={onToggle}
+        onClick={() => { onFocus?.(); onToggle(); }}
         className={`border-b border-warm-200 cursor-pointer transition ${
           expanded ? 'bg-accent-primary/5' : 'hover:bg-warm-100'
         }`}

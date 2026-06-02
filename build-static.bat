@@ -38,8 +38,10 @@ echo   本地预览: serve-site.bat
 echo   线上部署: 上传 site 目录全部文件
 echo.
 echo 云端数据（刷新后自动加载）:
-echo   site\data\courses.xlsx  — 课程
-echo   site\data\faculty.xlsx  — 师资
-echo   site\data\jobs.xlsx     — 岗位映射
-echo.
+echo   site\data\courses.xlsx           — 课程
+echo   site\data\faculty.xlsx           — 师资
+echo   site\data\jobs.xlsx              — 岗位映射
+echo   site\data\certs.xlsx             — 竞赛·证书
+echo   site\data\curriculum-design.xlsx — 课程体系设计
+echo   site\data\data-config.json       — 数据配置
 pause

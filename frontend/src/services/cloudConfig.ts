@@ -3,6 +3,8 @@ export interface DataConfig {
   courseExcel?: string
   facultyExcel?: string
   jobExcel?: string
+  certExcel?: string
+  curriculumExcel?: string
   cacheBust?: boolean
 }
 
@@ -22,7 +24,7 @@ export async function loadDataConfig(force = false): Promise<DataConfig | null> 
       return null
     }
     const config = (await res.json()) as DataConfig
-    if (config.enabled === false || (!config.courseExcel && !config.facultyExcel && !config.jobExcel)) {
+    if (config.enabled === false || (!config.courseExcel && !config.facultyExcel && !config.jobExcel && !config.certExcel && !config.curriculumExcel)) {
       cachedConfig = null
       return null
     }

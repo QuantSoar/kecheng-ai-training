@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from parser import parse_workbook
 from faculty_parser import parse_faculty_workbook
 from job_map_parser import parse_job_map_workbook
+from comp_cert_parser import parse_comp_cert_workbook
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -20,6 +21,8 @@ FACULTY_UPLOAD_DIR = UPLOAD_DIR / "faculty"
 FACULTY_UPLOAD_DIR.mkdir(exist_ok=True)
 JOB_UPLOAD_DIR = UPLOAD_DIR / "jobs"
 JOB_UPLOAD_DIR.mkdir(exist_ok=True)
+CERT_UPLOAD_DIR = UPLOAD_DIR / "certs"
+CERT_UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="AI课程图谱 API", version="1.0.0")
 
@@ -37,6 +40,8 @@ _faculty_cache: dict | None = None
 _faculty_cache_file: str | None = None
 _job_cache: dict | None = None
 _job_cache_file: str | None = None
+_cert_cache: dict | None = None
+_cert_cache_file: str | None = None
 
 
 def _purge_other_uploads(directory: Path, keep: Path) -> None:
@@ -56,9 +61,16 @@ def _purge_other_uploads(directory: Path, keep: Path) -> None:
                 pass
 
 
+def _is_cert_excel(path: str) -> bool:
+    name = os.path.basename(path)
+    if name.lower() == "certs.xlsx":
+        return True
+    return "竞赛" in name or "证书" in name
+
+
 def _is_job_excel(path: str) -> bool:
     name = os.path.basename(path)
-    if "师资" in name:
+    if "师资" in name or _is_cert_excel(path):
         return False
     if "岗位" in name or name.lower() == "jobs.xlsx":
         return True
@@ -67,7 +79,11 @@ def _is_job_excel(path: str) -> bool:
 
 def _is_course_excel(path: str) -> bool:
     name = os.path.basename(path)
-    return "师资" not in name and "岗位" not in name and name.lower() != "jobs.xlsx"
+    if "师资" in name or "岗位" in name or name.lower() == "jobs.xlsx":
+        return False
+    if _is_cert_excel(path):
+        return False
+    return True
 
 
 def _find_default_excel() -> str | None:
@@ -131,6 +147,22 @@ def _find_default_job_excel() -> str | None:
     return None
 
 
+def _find_default_cert_excel() -> str | None:
+    patterns = [
+        str(CERT_UPLOAD_DIR / "*.xlsx"),
+        str(CERT_UPLOAD_DIR / "*.xls"),
+        str(BASE_DIR / "*竞赛*.xlsx"),
+        str(BASE_DIR / "*证书*.xlsx"),
+        str(BASE_DIR / "certs.xlsx"),
+    ]
+    files: list[str] = []
+    for pattern in patterns:
+        files.extend(f for f in glob.glob(pattern) if _is_cert_excel(f))
+    if files:
+        return max(files, key=os.path.getmtime)
+    return None
+
+
 def _load_faculty_data(filepath: str) -> dict:
     global _faculty_cache, _faculty_cache_file
     data = parse_faculty_workbook(filepath, canonical_labs=_canonical_labs())
@@ -169,6 +201,26 @@ def _get_job_cache() -> dict:
             detail="尚未上传岗位映射 Excel，请将文件放到项目根目录，或在「数据管理」页上传",
         )
     return _job_cache
+
+
+def _load_cert_data(filepath: str) -> dict:
+    global _cert_cache, _cert_cache_file
+    data = parse_comp_cert_workbook(filepath)
+    _cert_cache = data
+    _cert_cache_file = filepath
+    return data
+
+
+def _get_cert_cache() -> dict:
+    if _cert_cache is None:
+        default = _find_default_cert_excel()
+        if default:
+            return _load_cert_data(default)
+        raise HTTPException(
+            status_code=404,
+            detail="尚未上传竞赛·证书 Excel，请将文件放到项目根目录，或在「数据管理」页上传",
+        )
+    return _cert_cache
 
 
 def _load_data(filepath: str) -> dict:
@@ -216,6 +268,13 @@ def startup_load():
             print(f"已自动加载岗位映射: {job}")
         except Exception as e:
             print(f"岗位映射自动加载失败: {e}")
+    cert = _find_default_cert_excel()
+    if cert:
+        try:
+            _load_cert_data(cert)
+            print(f"已自动加载竞赛·证书: {cert}")
+        except Exception as e:
+            print(f"竞赛·证书自动加载失败: {e}")
 
 
 @app.get("/api/health")
@@ -228,6 +287,8 @@ def health():
         "faculty_file": _faculty_cache_file,
         "job_loaded": _job_cache is not None,
         "job_file": _job_cache_file,
+        "cert_loaded": _cert_cache is not None,
+        "cert_file": _cert_cache_file,
     }
 
 
@@ -361,6 +422,12 @@ def _resolve_job_excel_path() -> str | None:
     if _job_cache_file and os.path.isfile(_job_cache_file):
         return _job_cache_file
     return _find_default_job_excel()
+
+
+def _resolve_cert_excel_path() -> str | None:
+    if _cert_cache_file and os.path.isfile(_cert_cache_file):
+        return _cert_cache_file
+    return _find_default_cert_excel()
 
 
 @app.post("/api/reload")
@@ -514,3 +581,50 @@ def reload_job_default():
         raise HTTPException(status_code=404, detail="未找到岗位映射 Excel 文件")
     data = _load_job_data(path)
     return {"message": "岗位映射重新加载成功", "file": path, "meta": data["meta"]}
+
+
+# ── 竞赛·证书映射 ──
+
+
+@app.get("/api/certs/data")
+def get_cert_data():
+    return _get_cert_cache()
+
+
+@app.get("/api/certs/meta")
+def get_cert_meta():
+    data = _get_cert_cache()
+    return {"meta": data["meta"], "source_file": _cert_cache_file}
+
+
+@app.post("/api/certs/upload")
+async def upload_cert_excel(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="请上传 .xlsx 文件")
+
+    save_path = CERT_UPLOAD_DIR / file.filename
+    content = await file.read()
+    save_path.write_bytes(content)
+    _purge_other_uploads(CERT_UPLOAD_DIR, save_path)
+
+    try:
+        data = _load_cert_data(str(save_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"竞赛·证书 Excel 解析失败: {e}") from e
+
+    return JSONResponse(
+        {
+            "message": "竞赛·证书上传并解析成功",
+            "filename": file.filename,
+            "meta": data["meta"],
+        }
+    )
+
+
+@app.post("/api/certs/reload")
+def reload_cert_default():
+    path = _resolve_cert_excel_path()
+    if not path:
+        raise HTTPException(status_code=404, detail="未找到竞赛·证书 Excel 文件")
+    data = _load_cert_data(path)
+    return {"message": "竞赛·证书重新加载成功", "file": path, "meta": data["meta"]}
